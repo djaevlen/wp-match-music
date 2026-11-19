@@ -8,7 +8,8 @@
     "dev": "vite",
     "proto": "vite --host",
     "test:php": "wp-env run tests-cli --env-cwd=wp-content/mm-dev vendor/bin/phpunit",
-    "build": "vite build"
+    "build": "vite build",
+    "test:e2e": "npm run build && playwright test tests/e2e"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.1",
