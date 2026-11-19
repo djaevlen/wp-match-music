@@ -738,3 +738,35 @@ test('audioRunning reports the output and outputChanged notifies', async () => {
   expect(fn).toHaveBeenCalled();
 });
 
+test('the session-expired flag clears on the next successful call', async () => {
+  const s = setup([track(1)], { autoLoad: true });
+  s.api.listTracks.mockRejectedValueOnce(new SessionExpiredError());
+  await s.store.refresh();
+  expect(s.store.sessionExpired()).toBe(true);
+  const fn = vi.fn();
+  s.store.subscribe(fn);
+  await s.store.refresh(); // logged in again in another tab
+  expect(s.store.sessionExpired()).toBe(false);
+  expect(fn).toHaveBeenCalled();
+});
+
+test('a failure other than expiry keeps the session-expired flag', async () => {
+  const s = setup([track(1)], { autoLoad: true });
+  s.api.saveSettings.mockRejectedValueOnce(new SessionExpiredError());
+  await expect(s.store.saveFade(1000)).rejects.toBeInstanceOf(SessionExpiredError);
+  s.api.saveSettings.mockRejectedValueOnce(new ApiError('mm_network', 'offline', 0));
+  await expect(s.store.saveFade(1000)).rejects.toThrow('offline');
+  expect(s.store.sessionExpired()).toBe(true);
+});
+
+test('an audio load (maybe from the cache) does not clear the session-expired flag', async () => {
+  const s = setup([track(1), track(2)]);
+  await s.store.refresh();
+  s.api.listTracks.mockRejectedValueOnce(new SessionExpiredError());
+  s.api.getSettings.mockRejectedValueOnce(new SessionExpiredError());
+  await s.store.refresh();
+  expect(s.store.sessionExpired()).toBe(true);
+  await s.resolveLoad(1);
+  expect(s.statuses()[0]).toBe('ready');
+  expect(s.store.sessionExpired()).toBe(true);
+});

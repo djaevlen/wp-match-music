@@ -56,11 +56,14 @@ test('no unreachable message once the list has arrived', () => {
   expect(screen.getByText('No tracks yet.')).toBeInTheDocument();
 });
 
-test('session expiry shows a log-in link', () => {
+test('session expiry shows a log-in link that opens in a new tab, so the board keeps playing', () => {
   fakeStore({ listed: () => true, sessionExpired: () => true });
   render(<Board />);
   expect(screen.getByRole('alert')).toHaveTextContent('The session has expired.');
-  expect(screen.getByRole('link', { name: 'Log in' })).toHaveAttribute('href', '/wp-login.php?redirect_to=board');
+  const link = screen.getByRole('link', { name: 'Log in' });
+  expect(link).toHaveAttribute('href', '/wp-login.php?redirect_to=board');
+  expect(link).toHaveAttribute('target', '_blank');
+  expect(link).toHaveAttribute('rel', 'noopener');
 });
 
 test('asks for a tap while the audio is not running', () => {

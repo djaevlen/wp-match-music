@@ -112,6 +112,16 @@ test('Play as the first gesture: the row never says playing before the audio run
   await expect(row(page, a)).toHaveAttribute('data-status', 'ready', { timeout: FADE_MS + 1_000 });
 });
 
+test('a swipe or double tap on a phone cannot reload or zoom the board', async ({ page }) => {
+  await openBoard(page);
+  const style = await page.evaluate(() => ({
+    html: getComputedStyle(document.documentElement).overscrollBehaviorY,
+    body: getComputedStyle(document.body).overscrollBehaviorY,
+    touch: getComputedStyle(document.body).touchAction,
+  }));
+  expect(style).toEqual({ html: 'none', body: 'none', touch: 'manipulation' });
+});
+
 test('one track at a time', async ({ page }) => {
   await openBoard(page);
   await button(page, a, strings.row.play).click();

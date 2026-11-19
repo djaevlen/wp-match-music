@@ -44,7 +44,8 @@ export function Board() {
           className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm"
         >
           <span>{strings.errors.sessionExpired}</span>
-          <a className="font-medium underline underline-offset-4" href={boot.loginUrl}>
+          {/* A new tab: leaving the board would stop the music (spec 7.9). */}
+          <a className="font-medium underline underline-offset-4" href={boot.loginUrl} target="_blank" rel="noopener">
             {strings.board.logIn}
           </a>
         </div>

@@ -121,8 +121,14 @@
   * {
     @apply border-border outline-ring/50;
     }
+  /* On a phone, a swipe down at the top must not reload the board (pull-to-refresh), and a
+     quick Play/Stop must not zoom (double-tap): either would stop the music. */
+  html, body {
+    overscroll-behavior-y: none;
+    }
   body {
     @apply bg-background text-foreground;
+    touch-action: manipulation;
     }
   html {
     @apply font-sans;

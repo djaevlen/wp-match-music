@@ -62,6 +62,7 @@ export class BoardStore {
   private order: number[] = [];
   private fade: number;
   private expired = false;
+  private expiries = 0; // session expiries seen so far
   private listeners = new Set<() => void>();
   private cachedRows: BoardRow[] | null = null;
 
@@ -263,7 +264,7 @@ export class BoardStore {
     const e = this.entries.get(id);
     if (!e) throw new Error(`No track ${id}`);
     if (e.blob && e.voiceVersion === e.track.version) return e.blob;
-    return this.call(() => this.deps.loadBlob(e.track));
+    return this.call(() => this.deps.loadBlob(e.track), false);
   }
 
   // Editing
@@ -339,14 +340,28 @@ export class BoardStore {
     return e.failed !== null && e.wanted === null ? 'error' : 'loading';
   }
 
-  /** Runs an API call; notes when the login session has expired (logging in again reloads the board). */
-  private async call<T>(fn: () => Promise<T>): Promise<T> {
+  /**
+   * Runs a request; notes when the login session has expired, and that it is back once a
+   * server call succeeds again (logged in again in another tab). An audio load can be served
+   * from the device's cache, so its success proves nothing about the session.
+   */
+  private async call<T>(fn: () => Promise<T>, provesSession = true): Promise<T> {
+    const epoch = this.expiries;
     try {
-      return await fn();
-    } catch (err) {
-      if (err instanceof SessionExpiredError && !this.expired) {
-        this.expired = true;
+      const result = await fn();
+      // Only a call begun after the last expiry was seen proves the session is back.
+      if (provesSession && this.expired && epoch === this.expiries) {
+        this.expired = false;
         this.changed();
+      }
+      return result;
+    } catch (err) {
+      if (err instanceof SessionExpiredError) {
+        this.expiries++;
+        if (!this.expired) {
+          this.expired = true;
+          this.changed();
+        }
       }
       throw err;
     }
@@ -486,7 +501,7 @@ export class BoardStore {
 
     e.loading = version;
     this.downloads++;
-    this.call(() => this.deps.loadBlob(e.track)).then(
+    this.call(() => this.deps.loadBlob(e.track), false).then(
       (blob) => {
         this.downloads--;
         this.pumpDownloads();
