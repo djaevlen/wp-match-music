@@ -21,7 +21,7 @@ Date: 2026-11-19. Machine: macOS (Apple Silicon), Playwright 1.65.1 (Chromium, F
 - `?mute=1` (used by the tests) sets a gain node after the meter to 0, so automated runs make no sound. Chromium also gets `--mute-audio` and Firefox `media.volume_scale=0.0`. All three mute only the final output. Muted and unmuted runs gave identical numbers.
 - **Harness check:** the same meter, fed by a plain `AudioBufferSourceNode` started at 10.3 s, read delay 0.4 ms, landing 10.3003 s and spread 0 in all three engines. So the meter is accurate, and the failures below belong to the `<audio>` element, not to the harness.
 
-## Attempt 1: `<audio>` element voice (`src/audio/element-voice.ts`): FAILED
+## Attempt 1: `<audio>` element voice (`src/audio/element-voice.ts`, since moved to `prototype/element-voice.ts`): FAILED
 
 `GATE_VOICE=element npx playwright test tests/gate` (that run predates the `rate` parameter). Every element run used the device's default context rate, 48 000 Hz, against the 44.1 kHz files.
 

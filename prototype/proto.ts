@@ -2,7 +2,7 @@
 import { Engine } from '../src/audio/engine';
 import { getAudioContext, unlockAudio } from '../src/audio/context';
 import { createBufferVoice } from '../src/audio/buffer-voice';
-import { createElementVoice } from '../src/audio/element-voice';
+import { createElementVoice } from './element-voice';
 import { snapMs } from '../src/lib/time';
 
 const FIXTURES = ['click-vbr.mp3', 'click-vbr-noxing.mp3', 'click-cbr.mp3'];

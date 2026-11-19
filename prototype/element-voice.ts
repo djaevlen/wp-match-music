@@ -1,5 +1,5 @@
-import { createFader } from './fader';
-import type { Voice } from './voice';
+import { createFader } from '../src/audio/fader';
+import type { Voice } from '../src/audio/voice';
 
 const SEEK_TOLERANCE_SEC = 0.001;
 
