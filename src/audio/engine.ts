@@ -100,6 +100,14 @@ export class Engine {
     this.emit();
   }
 
+  /** Silence a playing or fading track at once, with no fade, and make it ready again. */
+  cut(id: number): void {
+    const t = this.tracks.get(id);
+    if (!t || t.state === 'ready') return;
+    this.settle(id);
+    this.emit();
+  }
+
   state(id: number): TrackState | undefined {
     return this.tracks.get(id)?.state;
   }

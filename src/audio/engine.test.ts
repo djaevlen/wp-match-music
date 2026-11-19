@@ -1,25 +1,5 @@
 import { Engine } from './engine';
-import type { Voice } from './voice';
-
-class FakeVoice implements Voice {
-  calls: [string, number?][] = [];
-  private ended: (() => void) | null = null;
-  constructor(readonly durationSec: number) {}
-  private rec(name: string, arg?: number) {
-    this.calls.push(arg === undefined ? [name] : [name, arg]);
-  }
-  arm(s: number) { this.rec('arm', s); }
-  start(s: number) { this.rec('start', s); }
-  halt() { this.rec('halt'); }
-  fadeOut(s: number) { this.rec('fadeOut', s); }
-  cancelFade() { this.rec('cancelFade'); }
-  positionSec() { return 0; }
-  onEnded(cb: () => void) { this.ended = cb; }
-  dispose() { this.rec('dispose'); }
-  fireEnded() { this.ended?.(); }
-  last() { return this.calls[this.calls.length - 1]; }
-  names() { return this.calls.map((c) => c[0]); }
-}
+import { FakeVoice } from '@/test/fake-voice';
 
 beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); });
@@ -59,3 +39,13 @@ test('A, B, A in one tick leaves only A sounding', () => { const { e, a, b } = s
   expect(e.activeId()).toBe(1); expect(b.last()).toEqual(['arm', 5]); expect(a.last()).toEqual(['start', 42.3]); });
 test('subscribers hear every state change', () => { const { e } = setup(); const fn = vi.fn(); e.subscribe(fn);
   e.play(1); e.stop(1); vi.advanceTimersByTime(2000); expect(fn).toHaveBeenCalledTimes(3); });
+test('cut halts a playing track at once and re-arms it', () => { const { e, a } = setup(); e.play(1); e.cut(1);
+  expect(a.names()).not.toContain('fadeOut'); expect(a.calls.slice(-2)).toEqual([['halt'], ['arm', 42.3]]);
+  expect(e.state(1)).toBe('ready'); expect(e.activeId()).toBeNull(); });
+test('cut during a fade cancels the pending halt', () => { const { e, a } = setup(); e.play(1); e.stop(1); e.cut(1);
+  expect(e.state(1)).toBe('ready'); const n = a.calls.length; vi.advanceTimersByTime(5000); expect(a.calls.length).toBe(n); });
+test('cut on an idle track does nothing', () => { const { e, a } = setup(); const fn = vi.fn(); e.subscribe(fn);
+  e.cut(1); e.cut(99); expect(a.calls.length).toBe(1); expect(fn).not.toHaveBeenCalled(); });
+test('cut honours a deferred remove and notifies', () => { const { e, a } = setup(); const fn = vi.fn();
+  e.play(1); e.remove(1); e.subscribe(fn); e.cut(1);
+  expect(e.has(1)).toBe(false); expect(a.last()).toEqual(['dispose']); expect(fn).toHaveBeenCalledTimes(1); });
