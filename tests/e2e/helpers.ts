@@ -69,6 +69,29 @@ export function seedTrack(fixture: string, name: string, startMs = 0): number {
   return Number(out);
 }
 
+/** Creates `count` tracks in one call (named "<prefix> 1" ...). Returns their ids, in order. */
+export function seedTracks(fixture: string, prefix: string, count: number): number[] {
+  const out = wpPhp(
+    `
+    $ids = [];
+    for ( $i = 1; $i <= $in['count']; $i++ ) {
+      $tmp = wp_tempnam( 'mm-e2e' );
+      copy( WP_CONTENT_DIR . '/mm-dev/tests/fixtures/' . $in['fixture'], $tmp );
+      $id = \\MatchMusic\\create_track( $in['prefix'] . ' ' . $i, $tmp, $in['fixture'] );
+      if ( is_wp_error( $id ) ) { WP_CLI::error( $id->get_error_message() ); }
+      $ids[] = $id;
+    }
+    echo wp_json_encode( $ids );
+  `,
+    { fixture, prefix, count },
+  );
+  return JSON.parse(out);
+}
+
+export function deleteTracks(ids: number[]): void {
+  wpPhp(`foreach ( $in as $id ) { \\MatchMusic\\delete_track( (int) $id ); }`, ids);
+}
+
 export function setFadeMs(ms: number): void {
   wpPhp(`\\MatchMusic\\set_fade_ms( (int) $in );`, ms);
 }
@@ -165,7 +188,14 @@ export async function boardAs(browser: Browser, user: User, viewport?: { width: 
 /** The board is up and no row is still loading. */
 export async function waitForBoard(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: strings.appTitle })).toBeVisible();
-  await expect(page.locator('[data-status="loading"]')).toHaveCount(0);
+  // Rows (or the empty-board text) must exist before "none is loading" means anything.
+  await expect(async () => {
+    const rows = await page.locator('[data-track-id]').count();
+    const empty = await page.getByText(strings.board.noTracks).isVisible();
+    expect(rows > 0 || empty).toBe(true);
+  }).toPass({ timeout: 20_000 });
+  // Decoding can be slow in WebKit under load.
+  await expect(page.locator('[data-status="loading"]')).toHaveCount(0, { timeout: 20_000 });
 }
 
 export const row = (page: Page, id: number) => page.locator(`[data-track-id="${id}"]`);

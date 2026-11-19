@@ -7,10 +7,12 @@ import {
   mutedAudio,
   now,
   recordStatuses,
+  deleteTracks,
   resetBoard,
   row,
   rowNamed,
   seedTrack,
+  seedTracks,
   setFadeMs,
   statusesOf,
   strings,
@@ -36,8 +38,8 @@ test.beforeEach(() => setFadeMs(FADE_MS));
 async function openBoard(page: Page, user: User = users.subscriber): Promise<void> {
   await login(page, user);
   await waitForBoard(page);
-  await expect(row(page, a)).toHaveAttribute('data-status', 'ready');
-  await expect(row(page, b)).toHaveAttribute('data-status', 'ready');
+  await expect(row(page, a)).toHaveAttribute('data-status', 'ready', { timeout: 20_000 });
+  await expect(row(page, b)).toHaveAttribute('data-status', 'ready', { timeout: 20_000 });
   await recordStatuses(page);
 }
 
@@ -80,8 +82,11 @@ test('play, fade, ready', async ({ page }) => {
 async function reloadWithoutGesture(page: Page): Promise<void> {
   await page.reload();
   await waitForBoard(page);
-  await expect(row(page, a)).toHaveAttribute('data-status', 'ready');
-  expect((await mutedAudio(page))[0].state).not.toBe('running');
+  await expect(row(page, a)).toHaveAttribute('data-status', 'ready', { timeout: 20_000 });
+  // The audio context may not exist yet; poll until it does and is not running.
+  await expect
+    .poll(async () => (await mutedAudio(page))[0]?.state ?? 'none', { timeout: 10_000 })
+    .toMatch(/^(suspended|interrupted)$/);
 }
 
 const soundHint = (page: Page) => page.getByRole('status').filter({ hasText: strings.board.enableSound });
@@ -126,6 +131,53 @@ for (const size of [
     expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(1);
   });
 }
+
+test.describe('the sound hint on a long list at 375px', () => {
+  let extra: number[] = [];
+  test.beforeAll(() => {
+    extra = seedTracks('click-cbr.mp3', 'Long', 20);
+  });
+  test.afterAll(() => deleteTracks(extra));
+
+  const chipBox = async (page: Page) => (await soundHint(page).locator('> div').boundingBox())!;
+  const intersects = (p: { x: number; y: number; width: number; height: number }, q: typeof p) =>
+    p.x < q.x + q.width && q.x < p.x + p.width && p.y < q.y + q.height && q.y < p.y + p.height;
+
+  test('tapping the chip unlocks the audio and never presses a Play underneath', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 800 });
+    await login(page, users.subscriber);
+    await reloadWithoutGesture(page);
+    await expect(soundHint(page)).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeGreaterThan(800);
+
+    const chip = await chipBox(page);
+    // Make the test real: some Play button lies under the chip at this scroll position.
+    const plays = await page.getByRole('button', { name: strings.row.play, exact: true }).filter({ visible: true }).all();
+    const boxes = await Promise.all(plays.map((p) => p.boundingBox()));
+    expect(boxes.some((bx) => bx && intersects(bx, chip))).toBe(true);
+
+    await page.mouse.click(chip.x + chip.width / 2, chip.y + chip.height / 2);
+    await expect(soundHint(page)).toBeHidden();
+    await expect.poll(async () => (await mutedAudio(page))[0]?.state).toBe('running');
+    await expect(page.locator('[data-status="playing"]')).toHaveCount(0);
+  });
+
+  test('the last row can be scrolled clear of the chip and plays', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 800 });
+    await login(page, users.subscriber);
+    await reloadWithoutGesture(page);
+    await expect(soundHint(page)).toBeVisible();
+
+    const last = page.locator('[data-track-id]').last();
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    const play = last.getByRole('button', { name: strings.row.play, exact: true }).filter({ visible: true });
+    await expect(play).toBeVisible();
+    expect(intersects((await play.boundingBox())!, await chipBox(page))).toBe(false);
+
+    await play.click();
+    await expect(last).toHaveAttribute('data-status', 'playing');
+  });
+});
 
 test('Play as the first gesture: the row never says playing before the audio runs', async ({ page }) => {
   await openBoard(page);

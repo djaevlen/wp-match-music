@@ -75,7 +75,10 @@ test('asks for a tap while the audio is not running', () => {
 test('the tap hint is a fixed, click-through overlay, not part of the layout flow', () => {
   fakeStore({ listed: () => true, audioRunning: () => false });
   render(<Board />);
-  expect(screen.getByRole('status')).toHaveClass('fixed', 'pointer-events-none');
+  const status = screen.getByRole('status');
+  expect(status).toHaveClass('fixed', 'pointer-events-none');
+  // The chip takes the tap itself, so it never presses a Play button underneath.
+  expect(status.firstElementChild).toHaveClass('pointer-events-auto');
 });
 
 test('no tap hint once the audio runs, or before the list arrives', () => {

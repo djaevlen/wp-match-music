@@ -126,6 +126,11 @@ test('rejects a fake mp3 with a reason', async ({ page }) => {
 });
 
 test('delete removes the row for everyone', async ({ page, browser }) => {
+  // Own board, so this passes alone: exactly one track, named click-cbr.
+  resetBoard();
+  seedTrack('click-cbr.mp3', 'click-cbr');
+  await page.reload();
+  await waitForBoard(page);
   const sub = await boardAs(browser, users.subscriber);
   await expect(rowNamed(sub.page, 'click-cbr')).toHaveCount(1);
 
