@@ -81,3 +81,43 @@ test('hidden for viewers', () => {
   expect(screen.queryByRole('button', { name: 'Add mp3' })).toBeNull();
   expect(screen.getByText('the list')).toBeInTheDocument();
 });
+
+describe('page-wide drops', () => {
+  const dt = (files: File[], types = ['Files']) => ({ dataTransfer: { files, types } });
+
+  test('a file dropped on the page is blocked and ignored for a viewer', () => {
+    const upload = vi.fn();
+    render(<AddTracks store={{ upload }} canEdit={false}><p>the list</p></AddTracks>);
+    expect(fireEvent.dragOver(document.body, dt([file('a.mp3')]))).toBe(false);
+    expect(fireEvent.drop(document.body, dt([file('a.mp3')]))).toBe(false);
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  test('a file dropped anywhere on the page is blocked and uploaded for an editor', async () => {
+    const { upload } = setup();
+    const a = file('a.mp3');
+    expect(fireEvent.drop(document.body, dt([a]))).toBe(false);
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
+    expect(upload.mock.calls[0][0]).toEqual([a]);
+  });
+
+  test('a dropped link is blocked but is not an upload', () => {
+    const { upload } = setup();
+    expect(fireEvent.drop(screen.getByText('the list'), dt([], ['text/uri-list']))).toBe(false);
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  test('drops into text fields are left alone', () => {
+    setup();
+    const field = document.createElement('input');
+    document.body.append(field);
+    expect(fireEvent.drop(field, dt([], ['text/plain']))).toBe(true);
+    field.remove();
+  });
+
+  test('the listeners go away on unmount', () => {
+    const { unmount } = setup();
+    unmount();
+    expect(fireEvent.drop(document.body, dt([file('a.mp3')]))).toBe(true);
+  });
+});

@@ -1,6 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import type { BoardRow } from '@/board-store';
-import { TrackList } from './TrackList';
+import { toast } from 'sonner';
+import { dropReorder, TrackList } from './TrackList';
+
+vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
 
 const rows: BoardRow[] = [1, 2, 3, 4, 5].map((id) => ({
   track: { id, name: `Track ${id}`, start_ms: 0, order: id, size: 1, version: 'a' },
@@ -34,4 +37,29 @@ test('clicking a row button plays and never reorders', () => {
   fireEvent.click(screen.getAllByRole('button', { name: 'Play' })[0]);
   expect(s.play).toHaveBeenCalledWith(1);
   expect(s.reorder).not.toHaveBeenCalled();
+});
+
+describe('dropping a dragged row', () => {
+  const ids = [1, 2, 3, 4];
+
+  test('saves the moved order', () => {
+    const s = store();
+    dropReorder(ids, 4, 2, s);
+    expect(s.reorder).toHaveBeenCalledTimes(1);
+    expect(s.reorder).toHaveBeenCalledWith([1, 4, 2, 3]);
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  test('says so when the order could not be saved', async () => {
+    const s = { reorder: vi.fn(async () => Promise.reject(new Error('no'))) };
+    dropReorder(ids, 1, 3, s);
+    await vi.waitFor(() => expect(toast.error).toHaveBeenCalledWith('The new order could not be saved.'));
+  });
+
+  test('dropping on the same place or outside any row does nothing', () => {
+    const s = store();
+    dropReorder(ids, 2, 2, s);
+    dropReorder(ids, 2, null, s);
+    expect(s.reorder).not.toHaveBeenCalled();
+  });
 });

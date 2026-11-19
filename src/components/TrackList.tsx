@@ -28,6 +28,17 @@ export interface TrackListProps {
   canEdit: boolean;
 }
 
+/** A drop of track `activeId` on `overId`: save the new order, or say it was not saved. */
+export function dropReorder(
+  ids: number[],
+  activeId: number,
+  overId: number | null,
+  store: Pick<BoardStore, 'reorder'>,
+): void {
+  if (overId === null || overId === activeId) return;
+  store.reorder(moveId(ids, activeId, overId)).catch(() => toast.error(strings.editor.orderNotSaved));
+}
+
 /** The drag handle: the only element that starts a drag, so the row's buttons keep their clicks. */
 function SortableRow({ row, store, canEdit }: { row: BoardRow } & Omit<TrackListProps, 'rows'>) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
@@ -79,11 +90,8 @@ export function TrackList({ rows, store, canEdit }: TrackListProps) {
   const half = Math.ceil(rows.length / 2);
   const columns = [rows.slice(0, half), rows.slice(half)].filter((c) => c.length > 0);
 
-  const onDragEnd = ({ active, over }: DragEndEvent) => {
-    if (!over || active.id === over.id) return;
-    const next = moveId(ids, Number(active.id), Number(over.id));
-    store.reorder(next).catch(() => toast.error(strings.editor.orderNotSaved));
-  };
+  const onDragEnd = ({ active, over }: DragEndEvent) =>
+    dropReorder(ids, Number(active.id), over ? Number(over.id) : null, store);
 
   const grid = (
     <div className="grid gap-2 lg:grid-cols-2 lg:gap-x-4">

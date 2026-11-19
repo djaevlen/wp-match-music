@@ -48,11 +48,9 @@ export function Board() {
         </div>
       )}
 
-      {store.listed() && (
-        <AddTracks store={store} canEdit={boot.canEdit}>
-          <TrackList rows={rows} store={store} canEdit={boot.canEdit} />
-        </AddTracks>
-      )}
+      <AddTracks store={store} canEdit={boot.canEdit}>
+        {store.listed() && <TrackList rows={rows} store={store} canEdit={boot.canEdit} />}
+      </AddTracks>
       <Toaster />
     </main>
   );
