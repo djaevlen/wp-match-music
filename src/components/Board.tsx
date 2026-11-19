@@ -2,9 +2,10 @@ import { getBoot } from '@/boot';
 import { useBoard } from '@/hooks/useBoard';
 import { strings } from '@/strings';
 import { Button } from '@/components/ui/button';
+import { Toaster } from '@/components/ui/sonner';
+import { AddTracks } from './AddTracks';
+import { chip, FadeControl } from './FadeControl';
 import { TrackList } from './TrackList';
-
-const chip = 'rounded-md border px-2 py-0.5 text-xs whitespace-nowrap text-muted-foreground tabular-nums';
 
 export function Board() {
   const store = useBoard();
@@ -22,7 +23,7 @@ export function Board() {
               {strings.board.loadingProgress(store.loaded(), store.total())}
             </span>
           )}
-          <span className={chip}>{strings.board.fade((store.fadeMs() / 1000).toFixed(1))}</span>
+          <FadeControl store={store} canEdit={boot.canEdit} />
         </div>
       </header>
 
@@ -47,7 +48,12 @@ export function Board() {
         </div>
       )}
 
-      {store.listed() && <TrackList rows={rows} store={store} canEdit={boot.canEdit} />}
+      {store.listed() && (
+        <AddTracks store={store} canEdit={boot.canEdit}>
+          <TrackList rows={rows} store={store} canEdit={boot.canEdit} />
+        </AddTracks>
+      )}
+      <Toaster />
     </main>
   );
 }

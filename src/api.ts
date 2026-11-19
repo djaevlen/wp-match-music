@@ -1,4 +1,5 @@
 import type { Boot } from './boot';
+import { formatBytes } from './lib/bytes';
 import { strings } from './strings';
 
 export interface Track {
@@ -169,7 +170,7 @@ export function createApi(boot: Boot): Api {
     listTracks: () => json<Track[]>('tracks'),
     uploadTrack(file, onProgress) {
       if (file.size > boot.maxUploadBytes) {
-        return Promise.reject(new ApiError('mm_too_large', strings.errors.tooLarge, 413));
+        return Promise.reject(new ApiError('mm_too_large', strings.errors.tooLarge(formatBytes(boot.maxUploadBytes)), 413));
       }
       return upload(file, onProgress);
     },

@@ -19,9 +19,18 @@ export const strings = {
     loading: 'Loading…',
     loadFailed: 'Could not load',
   },
+  editor: {
+    fadeNotSaved: 'The fade could not be saved.',
+    orderNotSaved: 'The new order could not be saved.',
+    addMp3: 'Add mp3',
+    dropHere: 'Drop mp3 files to add them',
+    notMp3: (name: string) => `${name} is not an mp3 file.`,
+    reorder: (name: string) => `Reorder ${name}`,
+    fadeLabel: 'Fade duration',
+  },
   // Shown when the API client itself fails; server errors keep the server's own message.
   errors: {
-    tooLarge: 'The file is too large to upload.',
+    tooLarge: (limit: string) => `The file is too large to upload (limit ${limit}).`,
     network: 'The network request failed. Check your connection and try again.',
     badResponse: 'The server sent a reply the board could not read.',
     httpStatus: (status: number) => `The server replied with an error (HTTP ${status}).`,
