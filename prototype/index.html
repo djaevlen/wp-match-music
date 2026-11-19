@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Match Music audio gate</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: system-ui, -apple-system, sans-serif;
+        --line: #8885;
+        --pass: #1a7f37;
+        --fail: #c62828;
+      }
+      body {
+        margin: 0 auto;
+        max-width: 760px;
+        padding: 16px;
+        line-height: 1.4;
+      }
+      h1 {
+        font-size: 1.3rem;
+        margin: 0 0 8px;
+      }
+      h2 {
+        font-size: 1.05rem;
+        margin: 24px 0 8px;
+      }
+      p.note {
+        margin: 0 0 12px;
+        font-size: 0.9rem;
+        opacity: 0.8;
+      }
+      .settings {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+      label {
+        display: flex;
+        flex-direction: column;
+        font-size: 0.85rem;
+        gap: 4px;
+      }
+      input,
+      button,
+      textarea {
+        font: inherit;
+        font-size: 16px; /* stops iOS zooming into focused fields */
+      }
+      input[type='number'] {
+        width: 7em;
+        min-height: 44px;
+        padding: 0 8px;
+        box-sizing: border-box;
+      }
+      button {
+        min-height: 48px;
+        min-width: 64px;
+        padding: 0 14px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: Canvas;
+        color: CanvasText;
+        touch-action: manipulation;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.4;
+      }
+      .add {
+        display: inline-flex;
+        align-items: center;
+        min-height: 48px;
+        padding: 0 14px;
+        border: 1px dashed var(--line);
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      .add input {
+        display: none;
+      }
+      .track {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 12px;
+        margin: 10px 0;
+      }
+      .track header {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        flex-wrap: wrap;
+        font-weight: 600;
+        word-break: break-all;
+      }
+      .status {
+        font-weight: 400;
+        font-variant-numeric: tabular-nums;
+        opacity: 0.8;
+      }
+      .buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 10px 0 0;
+      }
+      .runs {
+        font-family: ui-monospace, monospace;
+        font-size: 0.8rem;
+        white-space: pre-wrap;
+        margin: 8px 0 0;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 0.85rem;
+        font-variant-numeric: tabular-nums;
+      }
+      th,
+      td {
+        border-bottom: 1px solid var(--line);
+        padding: 6px 4px;
+        text-align: left;
+      }
+      .pass {
+        color: var(--pass);
+      }
+      .fail {
+        color: var(--fail);
+        font-weight: 600;
+      }
+      .table-wrap {
+        overflow-x: auto;
+      }
+      textarea {
+        width: 100%;
+        min-height: 8em;
+        box-sizing: border-box;
+        font-family: ui-monospace, monospace;
+        font-size: 12px;
+      }
+      #voice a[aria-current] {
+        font-weight: 700;
+        text-decoration: none;
+      }
+      #voice a {
+        display: inline-block;
+        padding: 10px 4px;
+      }
+      #ua {
+        font-size: 0.8rem;
+        word-break: break-all;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Match Music audio gate</h1>
+    <p class="note">
+      Dev-only test page. On iPhone, turn the ring/silent switch off. Tap Measure ×10 on each
+      file, then Copy results.
+    </p>
+
+    <p id="voice" class="note">Voice:</p>
+
+    <div class="settings">
+      <label>Start point (s)<input id="start" type="number" inputmode="decimal" min="0" step="0.1" value="10.3" /></label>
+      <label>Fade (s)<input id="fade" type="number" inputmode="decimal" min="0" max="10" step="0.5" value="2" /></label>
+    </div>
+
+    <div class="buttons">
+      <label class="add">Add local mp3…<input id="local" type="file" accept=".mp3,audio/mpeg" multiple /></label>
+      <button id="memtest" type="button">Memory test: load 20 × 4-minute track</button>
+    </div>
+
+    <div id="tracks"></div>
+
+    <h2>Summary</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Max delay (&lt;100 ms)</th>
+            <th>Spread (≤20 ms)</th>
+            <th>Mean landing (10.3 ±0.1 s)</th>
+          </tr>
+        </thead>
+        <tbody id="summary"></tbody>
+      </table>
+    </div>
+    <p id="meta" class="note"></p>
+    <p id="ua"></p>
+    <div class="buttons">
+      <button id="copy" type="button">Copy results</button>
+      <span id="copied" class="status" aria-live="polite"></span>
+    </div>
+    <textarea id="results" readonly aria-label="Results"></textarea>
+
+    <script type="module" src="./proto.ts"></script>
+  </body>
+</html>
