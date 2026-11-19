@@ -206,16 +206,59 @@ class RestTest extends WP_UnitTestCase {
 		$this->assertSame( 'mm_file_missing', $gone->get_data()['code'] );
 	}
 
-	public function test_audio_filter_passes_through_other_responses() {
-		$id      = $this->track();
-		$request = new WP_REST_Request( 'GET', "/match-music/v1/tracks/$id" );
-		$server  = rest_get_server();
-		$this->assertFalse( apply_filters( 'rest_pre_serve_request', false, new WP_REST_Response( [], 200 ), $request, $server ) );
+	public function test_audio_stream_path_only_for_genuine_permitted_get() {
+		$id  = $this->track();
+		$get = new WP_REST_Request( 'GET', "/match-music/v1/tracks/$id/audio" );
 
-		$audio = new WP_REST_Request( 'GET', "/match-music/v1/tracks/$id/audio" );
-		$this->assertFalse( apply_filters( 'rest_pre_serve_request', false, new WP_REST_Response( [], 404 ), $audio, $server ) );
-		$other = new WP_REST_Request( 'GET', '/wp/v2/tracks/1/audio' );
-		$this->assertFalse( apply_filters( 'rest_pre_serve_request', false, new WP_REST_Response( [], 200 ), $other, $server ) );
+		wp_set_current_user( $this->subscriber );
+		$genuine = rest_do_request( $get );
+		$this->assertInstanceOf( MatchMusic\Audio_Response::class, $genuine );
+		$this->assertSame( track_file( $id ), MatchMusic\audio_stream_path( $genuine, $get ) );
+
+		$head = new WP_REST_Request( 'HEAD', "/match-music/v1/tracks/$id/audio" );
+		$this->assertSame( track_file( $id ), MatchMusic\audio_stream_path( $genuine, $head ) );
+
+		$options = new WP_REST_Request( 'OPTIONS', "/match-music/v1/tracks/$id/audio" );
+		$this->assertNull( MatchMusic\audio_stream_path( $genuine, $options ) );
+		$this->assertNull( MatchMusic\audio_stream_path( new WP_REST_Response( [], 200 ), $get ) );
+		$this->assertNull( MatchMusic\audio_stream_path( new WP_REST_Response( null, 200 ), $options ) );
+
+		$enveloped = new WP_REST_Request( 'GET', "/match-music/v1/tracks/$id/audio" );
+		$enveloped->set_param( '_envelope', '1' );
+		$this->assertNull( MatchMusic\audio_stream_path( $genuine, $enveloped ) );
+		$this->assertNull( MatchMusic\audio_stream_path( new WP_REST_Response( [ 'body' => [] ], 200 ), $enveloped ) );
+
+		$other = new WP_REST_Request( 'GET', '/match-music/v1/tracks/' . ( $id + 1 ) . '/audio' );
+		$this->assertNull( MatchMusic\audio_stream_path( $genuine, $other ) );
+
+		wp_set_current_user( 0 );
+		$this->assertNull( MatchMusic\audio_stream_path( $genuine, $get ) );
+
+		wp_set_current_user( $this->subscriber );
+		add_filter( 'match_music_play_capability', function () { return 'manage_network'; } );
+		$this->assertNull( MatchMusic\audio_stream_path( $genuine, $get ) );
+	}
+
+	public function test_anonymous_envelope_and_options_yield_no_audio() {
+		$id = $this->track();
+		wp_set_current_user( 0 );
+		$server = rest_get_server();
+
+		$request = new WP_REST_Request( 'GET', "/match-music/v1/tracks/$id/audio" );
+		$request->set_param( '_envelope', '1' );
+		$result = rest_do_request( $request );
+		$this->assertNotInstanceOf( MatchMusic\Audio_Response::class, $result );
+		$enveloped = $server->envelope_response( $result, false );
+		$this->assertNull( MatchMusic\audio_stream_path( $enveloped, $request ) );
+		$this->assertSame( 401, $enveloped->get_data()['status'] );
+
+		$options = new WP_REST_Request( 'OPTIONS', "/match-music/v1/tracks/$id/audio" );
+		$result  = rest_do_request( $options );
+		$this->assertNotInstanceOf( MatchMusic\Audio_Response::class, $result );
+		$this->assertNull( MatchMusic\audio_stream_path( $result, $options ) );
+
+		$this->assertFalse( apply_filters( 'rest_pre_serve_request', false, $enveloped, $request, $server ) );
+		$this->assertFalse( apply_filters( 'rest_pre_serve_request', false, $result, $options, $server ) );
 	}
 
 	public function test_settings() {

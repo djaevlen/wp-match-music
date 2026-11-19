@@ -219,7 +219,7 @@ function rest_track_audio( \WP_REST_Request $request ) {
 		return rest_error( 'mm_file_missing', 'The audio file is missing.', 404 );
 	}
 
-	$response = new \WP_REST_Response( null, 200 );
+	$response = new Audio_Response( $id );
 	$response->header( 'Content-Type', 'audio/mpeg' );
 	$response->header( 'Content-Length', (string) filesize( $path ) );
 	$response->header( 'Cache-Control', 'private, no-store' );
@@ -228,17 +228,52 @@ function rest_track_audio( \WP_REST_Request $request ) {
 }
 
 /**
- * Streams the mp3 for a successful audio response instead of JSON-encoding it.
- * The path comes only from track_file().
+ * Marks a response that rest_track_audio() itself produced, after its permission
+ * check. Envelope and OPTIONS responses are plain WP_REST_Response objects.
  */
-function rest_stream_audio( $served, $result, $request ) {
-	if ( $served || ! $result instanceof \WP_HTTP_Response || 200 !== $result->get_status() ) {
-		return $served;
+class Audio_Response extends \WP_REST_Response {
+	private $track_id;
+
+	public function __construct( int $track_id ) {
+		parent::__construct( null, 200 );
+		$this->track_id = $track_id;
+	}
+
+	public function track_id(): int {
+		return $this->track_id;
+	}
+}
+
+/**
+ * Path of the mp3 to stream, or null when this response must not be streamed.
+ * Only a genuine, permitted GET/HEAD audio response qualifies; the path comes
+ * only from track_file().
+ */
+function audio_stream_path( $result, $request ): ?string {
+	if ( ! $result instanceof Audio_Response || 200 !== $result->get_status() ) {
+		return null;
+	}
+	if ( ! $request instanceof \WP_REST_Request || ! in_array( $request->get_method(), [ 'GET', 'HEAD' ], true ) ) {
+		return null;
+	}
+	if ( isset( $request['_envelope'] ) ) {
+		return null;
 	}
 	if ( ! preg_match( '#^/' . preg_quote( REST_NAMESPACE, '#' ) . '/tracks/(\d+)/audio$#', $request->get_route(), $m ) ) {
+		return null;
+	}
+	if ( (int) $m[1] !== $result->track_id() || ! can_play() ) {
+		return null;
+	}
+	return track_file( $result->track_id() );
+}
+
+/** Streams the mp3 for a successful audio response instead of JSON-encoding it. */
+function rest_stream_audio( $served, $result, $request ) {
+	if ( $served ) {
 		return $served;
 	}
-	$path = track_file( (int) $m[1] );
+	$path = audio_stream_path( $result, $request );
 	if ( null === $path ) {
 		return $served;
 	}
