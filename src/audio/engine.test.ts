@@ -49,3 +49,8 @@ test('cut on an idle track does nothing', () => { const { e, a } = setup(); cons
 test('cut honours a deferred remove and notifies', () => { const { e, a } = setup(); const fn = vi.fn();
   e.play(1); e.remove(1); e.subscribe(fn); e.cut(1);
   expect(e.has(1)).toBe(false); expect(a.last()).toEqual(['dispose']); expect(fn).toHaveBeenCalledTimes(1); });
+test('voice ends synchronously in start settles to ready', () => { const { e, a } = setup(); const fn = vi.fn(); e.subscribe(fn);
+  a.start = (s: number) => { a.calls.push(['start', s]); a.fireEnded(); }; // e.g. a start point at or past the end
+  e.play(1);
+  expect(e.state(1)).toBe('ready'); expect(e.activeId()).toBeNull();
+  expect(a.calls.slice(-3)).toEqual([['start', 42.3], ['halt'], ['arm', 42.3]]); expect(fn).toHaveBeenCalled(); });

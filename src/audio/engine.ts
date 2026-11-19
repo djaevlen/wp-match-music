@@ -77,9 +77,11 @@ export class Engine {
     if (this.active !== null && this.active !== id) this.settle(this.active);
     this.clearFadeTimer();
     if (t.state === 'fading') t.voice.cancelFade();
-    t.voice.start((fromMs ?? t.startMs) / 1000);
+    // State first: a voice can end inside start() (a start point at or past its end), and its
+    // ended callback must then find the track playing so it settles it back to ready.
     t.state = 'playing';
     this.active = id;
+    t.voice.start((fromMs ?? t.startMs) / 1000);
     this.emit();
   }
 
