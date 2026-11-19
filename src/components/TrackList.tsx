@@ -65,7 +65,7 @@ function SortableRow({
     <li
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={cn('relative', isDragging && 'z-10 opacity-90 shadow-lg')}
+      className={cn('relative min-w-0', isDragging && 'z-10 opacity-90 shadow-lg')}
     >
       <TrackRow
         row={row}
@@ -118,9 +118,10 @@ function SortableRow({
 }
 
 /**
- * One column; from `lg` two columns, filled top to bottom, then left to right. The two columns
- * are explicit lists (split at the midpoint) so that dragging can sort across them; stacked
- * below `lg` they read in the same order.
+ * One column; from `xl` (1280 px) two columns, filled top to bottom, then left to right. Below
+ * that a row with editor controls does not fit half the width. The two columns are explicit
+ * lists (split at the midpoint) so that dragging can sort across them; stacked below `xl` they
+ * read in the same order.
  */
 export function TrackList({ rows, store, canEdit }: TrackListProps) {
   const [editing, setEditing] = useState<number | null>(null);
@@ -141,9 +142,11 @@ export function TrackList({ rows, store, canEdit }: TrackListProps) {
     dropReorder(ids, Number(active.id), over ? Number(over.id) : null, store);
 
   const grid = (
-    <div className="grid gap-2 lg:grid-cols-2 lg:gap-x-4">
+    <div className="grid grid-cols-1 gap-2 xl:grid-cols-2 xl:gap-x-4">
       {columns.map((column, index) => (
-        <ul key={index} className="grid content-start gap-2">
+        // min-w-0 and a minmax(0, 1fr) column let a long name be cut off inside its row instead of
+        // widening the whole column, which pushed it under the other column.
+        <ul key={index} className="grid min-w-0 grid-cols-1 content-start gap-2">
           {column.map((row) =>
             canEdit ? (
               <SortableRow
@@ -154,7 +157,7 @@ export function TrackList({ rows, store, canEdit }: TrackListProps) {
                 onEdit={() => setEditing(row.track.id)}
               />
             ) : (
-              <li key={row.track.id}>
+              <li key={row.track.id} className="min-w-0">
                 <TrackRow row={row} store={store} canEdit={false} />
               </li>
             ),
