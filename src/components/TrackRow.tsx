@@ -59,63 +59,69 @@ export function TrackRow({ row, store, canEdit, editorSlot }: TrackRowProps) {
       data-status={status}
       data-track-id={id}
       className={cn(
-        'flex min-h-14 items-center gap-2 rounded-lg border bg-card px-3 py-2 transition-colors sm:min-h-0',
+        // The approved "compact" card: the name on its own line (up to two), then the start time
+        // and the controls on the line below.
+        'grid gap-1.5 rounded-lg border bg-card px-3 py-2 transition-colors',
         'data-[status=playing]:border-emerald-500 data-[status=playing]:bg-emerald-500/10 data-[status=playing]:ring-1 data-[status=playing]:ring-emerald-500',
         'data-[status=fading]:border-amber-500 data-[status=fading]:border-dashed data-[status=fading]:bg-amber-500/10',
         'data-[status=error]:border-destructive/50',
       )}
     >
-      <span className="min-w-0 flex-1 truncate font-medium">{track.name}</span>
-      <span
-        className={cn(
-          'shrink-0 text-xs tabular-nums',
-          status === 'error' ? 'text-destructive' : 'hidden text-muted-foreground sm:inline',
-          status === 'fading' && 'text-amber-700 dark:text-amber-400',
-        )}
-      >
-        {statusText(status, track.start_ms, () => store.elapsedSec(id))}
+      <span data-testid="row-name" title={track.name} className="line-clamp-2 font-medium break-words">
+        {track.name}
       </span>
+      <div className="flex min-w-0 items-center gap-2">
+        <span
+          className={cn(
+            'min-w-0 flex-1 truncate text-xs tabular-nums',
+            status === 'error' ? 'text-destructive' : 'text-muted-foreground',
+            status === 'fading' && 'text-amber-700 dark:text-amber-400',
+          )}
+        >
+          {statusText(status, track.start_ms, () => store.elapsedSec(id))}
+        </span>
 
-      {status === 'error' ? (
-        <Button variant="outline" onClick={() => store.retry(id)}>
-          <RotateCw />
-          {strings.row.retry}
-        </Button>
-      ) : (
-        <>
-          <div data-testid="row-wide-controls" className="hidden shrink-0 gap-1.5 sm:flex">
-            <Button
-              variant={status === 'playing' ? 'outline' : 'default'}
-              className={cn(status !== 'playing' && canPlay && solidPlay)}
-              disabled={!canPlay}
-              onClick={() => store.play(id)}
-            >
-              <Play />
-              {strings.row.play}
-            </Button>
-            <Button
-              variant={canStop ? 'default' : 'outline'}
-              className={cn(canStop && solidStop)}
-              disabled={!canStop}
-              onClick={() => store.stop(id)}
-            >
-              <Square />
-              {strings.row.stop}
-            </Button>
-          </div>
-          <Button
-            data-testid="row-toggle"
-            aria-label={toggleStops ? strings.row.stop : strings.row.play}
-            className={cn('h-12 w-16 shrink-0 sm:hidden [&_svg]:size-6', toggleStops ? solidStop : solidPlay)}
-            disabled={!canPlay}
-            onClick={() => (toggleStops ? store.stop(id) : store.play(id))}
-          >
-            {toggleStops ? <Square /> : <Play />}
+        {status === 'error' ? (
+          <Button variant="outline" onClick={() => store.retry(id)}>
+            <RotateCw />
+            {strings.row.retry}
           </Button>
-        </>
-      )}
+        ) : (
+          <>
+            <div data-testid="row-wide-controls" className="hidden shrink-0 gap-1.5 sm:flex">
+              <Button
+                variant={status === 'playing' ? 'outline' : 'default'}
+                className={cn(status !== 'playing' && canPlay && solidPlay)}
+                disabled={!canPlay}
+                onClick={() => store.play(id)}
+              >
+                <Play />
+                {strings.row.play}
+              </Button>
+              <Button
+                variant={canStop ? 'default' : 'outline'}
+                className={cn(canStop && solidStop)}
+                disabled={!canStop}
+                onClick={() => store.stop(id)}
+              >
+                <Square />
+                {strings.row.stop}
+              </Button>
+            </div>
+            <Button
+              data-testid="row-toggle"
+              aria-label={toggleStops ? strings.row.stop : strings.row.play}
+              className={cn('h-12 w-16 shrink-0 sm:hidden [&_svg]:size-6', toggleStops ? solidStop : solidPlay)}
+              disabled={!canPlay}
+              onClick={() => (toggleStops ? store.stop(id) : store.play(id))}
+            >
+              {toggleStops ? <Square /> : <Play />}
+            </Button>
+          </>
+        )}
 
-      {canEdit && editorSlot}
+        {canEdit && editorSlot}
+      </div>
     </div>
   );
 }

@@ -118,10 +118,10 @@ function SortableRow({
 }
 
 /**
- * One column; from `xl` (1280 px) two columns, filled top to bottom, then left to right. Below
- * that a row with editor controls does not fit half the width. The two columns are explicit
- * lists (split at the midpoint) so that dragging can sort across them; stacked below `xl` they
- * read in the same order.
+ * One column; from `lg` (1024 px) two columns, filled top to bottom, then left to right (the
+ * name has its own line, so a card with editor controls fits half of 1024). The two columns are
+ * explicit lists (split at the midpoint) so that dragging can sort across them; stacked below
+ * `lg` they read in the same order.
  */
 export function TrackList({ rows, store, canEdit }: TrackListProps) {
   const [editing, setEditing] = useState<number | null>(null);
@@ -142,7 +142,7 @@ export function TrackList({ rows, store, canEdit }: TrackListProps) {
     dropReorder(ids, Number(active.id), over ? Number(over.id) : null, store);
 
   const grid = (
-    <div className="grid grid-cols-1 gap-2 xl:grid-cols-2 xl:gap-x-4">
+    <div className="grid grid-cols-1 gap-2 lg:grid-cols-2 lg:gap-x-4">
       {columns.map((column, index) => (
         // min-w-0 and a minmax(0, 1fr) column let a long name be cut off inside its row instead of
         // widening the whole column, which pushed it under the other column.

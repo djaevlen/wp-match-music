@@ -61,13 +61,39 @@ async function checkLayout(page: Page) {
   for (let i = 0; i < boxes.length; i++)
     for (let j = i + 1; j < boxes.length; j++)
       expect(overlap(boxes[i], boxes[j]), `rows ${i + 1} and ${j + 1} overlap`).toBe(false);
+  return boxes;
 }
 
-for (const width of [1024, 1280, 1440, 1920]) {
+/** The name has its own line above the controls (the approved "compact" card). */
+async function checkNameAboveControls(page: Page) {
+  const rows = page.locator('[data-track-id]');
+  for (let i = 0; i < NAMES.length; i++) {
+    const r = rows.nth(i);
+    const name = await box(r.getByTestId('row-name'));
+    for (const control of await r.locator('button:visible').all()) {
+      const cb = await box(control);
+      expect(name.y + name.height <= cb.y + 0.5, `row ${i + 1}: a button sits beside the name`).toBe(true);
+    }
+  }
+  // A short name is shown whole; a long one wraps to at most two lines.
+  const short = r0(page, 'Short');
+  expect(await short.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  const long = r0(page, NAMES[0]);
+  const lineHeight = await long.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+  expect((await box(long)).height).toBeLessThanOrEqual(lineHeight * 2 + 1);
+}
+const r0 = (page: Page, name: string) =>
+  page.locator('[data-track-id]').filter({ hasText: name }).first().getByTestId('row-name');
+
+for (const width of [375, 1024, 1280, 1440, 1920]) {
   test(`long names never push a row under its neighbour at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await login(page, users.editor);
     await waitForBoard(page);
-    await checkLayout(page);
+    const boxes = await checkLayout(page);
+    await checkNameAboveControls(page);
+    // Two columns from 1024 px: the third row (first of the second column) sits to the right.
+    const twoColumns = boxes[2].x > boxes[0].x + boxes[0].width / 2;
+    expect(twoColumns, 'columns').toBe(width >= 1024);
   });
 }
