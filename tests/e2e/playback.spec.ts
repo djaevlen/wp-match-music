@@ -117,6 +117,9 @@ test('play during fade restarts', async ({ page }) => {
 });
 
 test('narrow layout toggle', async ({ page }) => {
+  // A 2 s fade leaves time to look at the toggle while the row fades.
+  const fadeMs = 2_000;
+  setFadeMs(fadeMs);
   await page.setViewportSize({ width: 375, height: 800 });
   await openBoard(page);
   const toggle = row(page, a).getByTestId('row-toggle');
@@ -128,7 +131,11 @@ test('narrow layout toggle', async ({ page }) => {
   await expect(toggle).toHaveAccessibleName(strings.row.stop);
 
   await toggle.click();
-  await expect(row(page, a)).toHaveAttribute('data-status', 'ready', { timeout: FADE_MS + 1_000 });
+  // During the fade the toggle already offers Play (spec 7.4).
+  await expect(row(page, a)).toHaveAttribute('data-status', 'fading');
+  await expect(toggle).toHaveAccessibleName(strings.row.play);
+  expect(await row(page, a).getAttribute('data-status')).toBe('fading'); // still fading when checked
+  await expect(row(page, a)).toHaveAttribute('data-status', 'ready', { timeout: fadeMs + 1_000 });
   await expect(toggle).toHaveAccessibleName(strings.row.play);
   expect((await statusesOf(page, a)).map((s) => s.status)).toEqual(['playing', 'fading', 'ready']);
 });

@@ -42,6 +42,21 @@ async function visibleText(res: APIResponse): Promise<string> {
   return `${headers}\n${(await res.body()).toString('latin1')}`;
 }
 
+/** Refused by the plugin's permission check (not, say, a bad nonce or a missing route). */
+async function expectForbidden(res: APIResponse, status: number): Promise<void> {
+  expect(res.status()).toBe(status);
+  expect((await res.json()).code).toBe('rest_forbidden');
+}
+
+/** WordPress's OPTIONS handler ran on the audio route: 200 and the route's description. */
+async function expectAudioRouteDescription(res: APIResponse): Promise<void> {
+  expect(res.status()).toBe(200);
+  const body = (await res.json()) as { namespace?: string; methods?: string[]; endpoints?: { methods: string[] }[] };
+  expect(body.namespace).toBe('match-music/v1');
+  expect(body.methods).toEqual(['GET']);
+  expect(body.endpoints?.some((e) => e.methods.includes('GET'))).toBe(true);
+}
+
 async function expectNoMp3(res: APIResponse): Promise<void> {
   const body = await res.body();
   expect(res.headers()['content-type'] ?? '').not.toContain('audio/mpeg');
@@ -59,7 +74,7 @@ test.describe('logged out', () => {
 
   test('logged out cannot fetch audio', async ({ request }) => {
     const res = await request.get(audioUrl());
-    expect(res.status()).toBe(401);
+    await expectForbidden(res, 401);
     await expectNoMp3(res);
   });
 
@@ -75,12 +90,16 @@ test.describe('logged out', () => {
     await expectNoMp3(envelope);
     expect((await envelope.json()).status).toBe(401);
 
-    // OPTIONS, real or emulated, describes the route; it must not stream the file.
+    // OPTIONS, real or emulated, reaches WordPress's OPTIONS handler on the audio route (proved
+    // by the route description), and must not stream the file.
     const options = await request.fetch(url, { method: 'OPTIONS' });
+    await expectAudioRouteDescription(options);
     await expectNoMp3(options);
     const methodParam = await request.post(`${url}?_method=OPTIONS`);
+    await expectAudioRouteDescription(methodParam);
     await expectNoMp3(methodParam);
     const methodHeader = await request.post(url, { headers: { 'X-HTTP-Method-Override': 'OPTIONS' } });
+    await expectAudioRouteDescription(methodHeader);
     await expectNoMp3(methodHeader);
 
     const head = await request.head(url);
@@ -112,8 +131,9 @@ test.describe('user without the play capability', () => {
 
     const nonce = await restNonce(page);
     const audio = await page.request.get(audioUrl(), { headers: { 'X-WP-Nonce': nonce } });
-    expect(audio.status()).toBe(403);
     await expectNoMp3(audio);
+    await expectForbidden(audio, 403);
+    await expectForbidden(await page.request.get(`${REST}/tracks`, { headers: { 'X-WP-Nonce': nonce } }), 403);
   });
 });
 
@@ -143,30 +163,31 @@ test.describe('subscriber', () => {
 
   test('subscriber write is refused', async ({ page }) => {
     const headers = { 'X-WP-Nonce': await restNonce(page) };
-    const patch = await page.request.patch(`${REST}/tracks/${trackId}`, { headers, data: { name: 'Hacked' } });
-    expect(patch.status()).toBe(403);
-    const del = await page.request.delete(`${REST}/tracks/${trackId}`, { headers });
-    expect(del.status()).toBe(403);
-    const order = await page.request.put(`${REST}/tracks/order`, { headers, data: { ids: [trackId] } });
-    expect(order.status()).toBe(403);
-    const fade = await page.request.put(`${REST}/settings`, { headers, data: { fade_ms: 500 } });
-    expect(fade.status()).toBe(403);
+    const track = `${REST}/tracks/${trackId}`;
+    await expectForbidden(await page.request.patch(track, { headers, data: { name: 'Hacked' } }), 403);
+    await expectForbidden(await page.request.patch(track, { headers, data: { start_ms: 5000 } }), 403);
+    await expectForbidden(await page.request.delete(track, { headers }), 403);
+    await expectForbidden(await page.request.put(`${REST}/tracks/order`, { headers, data: { ids: [trackId] } }), 403);
+    await expectForbidden(await page.request.put(`${REST}/settings`, { headers, data: { fade_ms: 500 } }), 403);
     const upload = await page.request.post(`${REST}/tracks`, {
       headers,
       multipart: { file: { name: 'short.mp3', mimeType: 'audio/mpeg', buffer: fixtureBytes('short.mp3') } },
     });
-    expect(upload.status()).toBe(403);
+    await expectForbidden(upload, 403);
 
-    // Nothing changed.
+    // Nothing changed: the one track keeps its name and start point, the fade its default.
     const list = await page.request.get(`${REST}/tracks`, { headers });
-    const tracks = (await list.json()) as { id: number; name: string }[];
-    expect(tracks.map((t) => [t.id, t.name])).toEqual([[trackId, 'Access check']]);
+    const tracks = (await list.json()) as { id: number; name: string; start_ms: number }[];
+    expect(tracks.map((t) => [t.id, t.name, t.start_ms])).toEqual([[trackId, 'Access check', 0]]);
+    const settings = await page.request.get(`${REST}/settings`, { headers });
+    expect(await settings.json()).toEqual({ fade_ms: 2000 });
   });
 
   test('audio is served intact and uncached', async ({ page }) => {
     const res = await page.request.get(audioUrl(), { headers: { 'X-WP-Nonce': await restNonce(page) } });
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('audio/mpeg');
+    expect(res.headers()['cache-control']).toContain('private');
     expect(res.headers()['cache-control']).toContain('no-store');
     const body = await res.body();
     expect(body.length).toBe(fixture.length);
