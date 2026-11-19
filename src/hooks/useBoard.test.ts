@@ -166,6 +166,15 @@ test('every gesture unlocks audio, in the capture phase', async () => {
   expect(unlock).toHaveBeenCalledTimes(GESTURES.length + 1);
 });
 
+test('a gesture while the audio runs leaves it alone', async () => {
+  const { unlock, ctx } = await mount();
+  act(() => ctx.set('running'));
+  act(() => {
+    window.dispatchEvent(new Event('click'));
+  });
+  expect(unlock).not.toHaveBeenCalled();
+});
+
 test('a gesture whose unlock settles tells the store', async () => {
   const { store } = await mount();
   const changed = vi.spyOn(store, 'outputChanged');

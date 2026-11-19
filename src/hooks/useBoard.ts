@@ -95,20 +95,21 @@ export function useBoard(env: BoardEnv = realEnv): BoardStore {
       void store.refresh();
       keepAwake(); // the browser can release the lock while the page is visible (battery saver)
     };
-    // Every gesture, not just the first: iOS can suspend the context again later.
-    const onGesture = () => {
-      env.unlockAudio().then(
-        () => store.outputChanged(),
-        () => {},
-      );
-      keepAwake();
-    };
-
     // iOS suspends or interrupts Web Audio when the phone is locked. The store cuts the sounding
     // track then (the row must say the music stopped) and starts a Play waiting for the output
     // once it runs. A hidden tab alone never stops it.
     const ctx = env.audioContext();
     const onAudioState = () => store.outputChanged();
+
+    // Every gesture, not just the first: iOS can suspend the context again later.
+    const onGesture = () => {
+      keepAwake();
+      if (ctx.state === 'running') return;
+      env.unlockAudio().then(
+        () => store.outputChanged(),
+        () => {},
+      );
+    };
 
     void store.refresh();
     keepAwake();
