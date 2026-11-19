@@ -23,10 +23,19 @@ function register_track_type(): void {
 	);
 }
 
-/** @return string|\WP_Error */
+/**
+ * Track names are plain text: stored exactly (no HTML encoding, no tag stripping) and
+ * escaped by whoever outputs them. Only invalid UTF-8, control characters and
+ * whitespace runs are cleaned.
+ *
+ * @return string|\WP_Error
+ */
 function validate_name( $name ) {
-	$name = is_string( $name ) ? sanitize_text_field( $name ) : '';
-	if ( '' === $name || mb_strlen( $name ) > MAX_NAME_LENGTH ) {
+	$name = is_string( $name ) ? wp_check_invalid_utf8( $name ) : '';
+	$name = preg_replace( '/\p{Cc}+/u', ' ', $name );
+	$name = trim( preg_replace( '/\s+/u', ' ', (string) $name ) );
+	$len  = function_exists( 'mb_strlen' ) ? mb_strlen( $name ) : strlen( $name );
+	if ( '' === $name || $len > MAX_NAME_LENGTH ) {
 		return new \WP_Error( 'mm_invalid_name', 'The track name must be 1 to 200 characters.' );
 	}
 	return $name;
@@ -41,19 +50,21 @@ function validate_start_ms( $value ) {
 }
 
 /**
- * Runs a post write without the kses title filters, so the title stays exactly as saved
- * (the name is sanitized by sanitize_text_field and escaped on output).
+ * Runs a post write without the kses title filter, so a name such as "Home <3" is saved
+ * exactly as given. The filter is restored even when a save hook throws.
  */
 function write_raw( callable $write ) {
-	$had_filters = false !== has_filter( 'title_save_pre', 'wp_filter_kses' );
-	if ( $had_filters ) {
-		kses_remove_filters();
+	$had_filter = false !== has_filter( 'title_save_pre', 'wp_filter_kses' );
+	if ( $had_filter ) {
+		remove_filter( 'title_save_pre', 'wp_filter_kses' );
 	}
-	$result = $write();
-	if ( $had_filters ) {
-		kses_init_filters();
+	try {
+		return $write();
+	} finally {
+		if ( $had_filter ) {
+			add_filter( 'title_save_pre', 'wp_filter_kses' );
+		}
 	}
-	return $result;
 }
 
 function next_order(): int {

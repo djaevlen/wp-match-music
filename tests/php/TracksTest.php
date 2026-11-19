@@ -91,4 +91,54 @@ class TracksTest extends WP_UnitTestCase {
 		$this->assertDirectoryDoesNotExist( $dir );
 		$this->assertFalse( get_option( 'match_music_settings' ) );
 	}
+
+	public function names_provider() {
+		return [
+			[ 'Home <3' ],
+			[ 'A <b> C' ],
+			[ 'Mix %ab' ],
+			[ 'Rock & Roll "Live" – Åge' ],
+		];
+	}
+
+	/**
+	 * @dataProvider names_provider
+	 */
+	public function test_names_round_trip_exactly( $name ) {
+		$id = create_track( 'Start', $this->tmp_copy(), 'a.mp3' );
+		foreach ( [ 'editor', 'author' ] as $role ) {
+			wp_set_current_user( self::factory()->user->create( [ 'role' => $role ] ) );
+			$before = has_filter( 'title_save_pre', 'wp_filter_kses' );
+			$this->assertSame( $name, update_track( $id, [ 'name' => $name ] )['name'] );
+			$this->assertSame( $name, get_track( $id )['name'] );
+			$this->assertSame( $before, has_filter( 'title_save_pre', 'wp_filter_kses' ) );
+		}
+		wp_set_current_user( 0 );
+		$created = get_track( create_track( $name, $this->tmp_copy(), 'b.mp3' ) );
+		$this->assertSame( $name, $created['name'] );
+	}
+
+	public function test_name_whitespace_is_normalised_and_length_limited() {
+		$id = create_track( 'Start', $this->tmp_copy(), 'a.mp3' );
+		$this->assertSame( 'Goal Song', update_track( $id, [ 'name' => "  Goal \t\n Song  " ] )['name'] );
+		$this->assertSame( 'mm_invalid_name', update_track( $id, [ 'name' => str_repeat( 'å', 201 ) ] )->get_error_code() );
+		$this->assertSame( 200, mb_strlen( update_track( $id, [ 'name' => str_repeat( 'å', 200 ) ] )['name'] ) );
+	}
+
+	public function test_purge_all_works_when_post_type_is_unregistered() {
+		$dir = private_dir();
+		$id  = create_track( 'X', $this->tmp_copy(), 'x.mp3' );
+		$path = track_file( $id );
+		update_option( 'match_music_settings', [ 'fade_ms' => 1000 ] );
+		unregister_post_type( 'mm_track' );
+		try {
+			purge_all();
+		} finally {
+			\MatchMusic\register_track_type();
+		}
+		$this->assertNull( get_post( $id ) );
+		$this->assertFileDoesNotExist( $path );
+		$this->assertDirectoryDoesNotExist( $dir );
+		$this->assertFalse( get_option( 'match_music_settings' ) );
+	}
 }
