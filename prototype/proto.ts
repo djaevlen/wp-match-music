@@ -7,6 +7,8 @@ import { snapMs } from '../src/lib/time';
 
 const FIXTURES = ['click-vbr.mp3', 'click-vbr-noxing.mp3', 'click-cbr.mp3'];
 const RUNS = 10;
+const CONTINUITY_SEC = 16; // from 10.3 s: clicks 11..26 s, across piece joins at 13.3 s and 23.3 s
+const MAX_GAP_ERROR_MS = 0.5;
 const GAP_MS = 300;
 const RUN_TIMEOUT_MS = 3000;
 const SIGNAL_LEVEL = 0.01;
@@ -33,14 +35,27 @@ export interface GateSummary {
   userAgent: string;
 }
 
+export interface ContinuityResult {
+  file: string;
+  voice: string;
+  seconds: number;
+  clickGapsSec: number[];
+  maxGapErrorMs: number;
+  dropouts: number;
+  meter: string;
+  sampleRate: number;
+  userAgent: string;
+}
+
 declare global {
   interface Window {
     __gate?: Record<string, GateSummary>;
+    __continuity?: Record<string, ContinuityResult>;
     __proto?: {
       play(file: string): void;
       stop(file: string): void;
       states(): Record<string, string>;
-      continuity(file: string, seconds: number): Promise<{ clickGapsSec: number[]; dropouts: number }>;
+      continuity(file: string, seconds?: number): Promise<ContinuityResult>;
     };
   }
 }
@@ -159,12 +174,16 @@ const tracksEl = $<HTMLDivElement>('tracks');
 const summaryEl = $<HTMLTableSectionElement>('summary');
 const resultsEl = $<HTMLTextAreaElement>('results');
 
-const ctx = getAudioContext();
+const params = new URLSearchParams(location.search);
+// ?rate=48000 (or 44100) forces the context's sample rate, so the gate can run with and
+// without resampling 44.1 kHz files. Without it the page uses the shared context.
+const forcedRate = Number(params.get('rate')) || 0;
+const ctx = forcedRate ? new AudioContext({ sampleRate: forcedRate }) : getAudioContext();
+const unlock = forcedRate ? () => (ctx.state === 'running' ? Promise.resolve() : ctx.resume()) : unlockAudio;
 const engine = new Engine();
 // Voices -> meterInput -> output -> speakers. The meter taps meterInput, upstream of
 // output, so ?mute=1 (used by the automated gate) silences the speakers without
 // changing what is measured. The manual/phone page stays audible by default.
-const params = new URLSearchParams(location.search);
 const muted = params.get('mute') === '1';
 // 'buffer' (decoded pieces, the default) or 'element' (<audio>, the first attempt).
 const voiceKind = params.get('voice') === 'element' ? 'element' : 'buffer';
@@ -187,6 +206,7 @@ interface Row {
 
 const rows: Row[] = [];
 const gate: Record<string, GateSummary> = {};
+const continuityResults: Record<string, ContinuityResult> = {};
 let nextId = 1;
 let measuring = false;
 let meterKind = '';
@@ -234,20 +254,21 @@ function addRow(name: string, src: string): void {
   header.append(title, status);
 
   const play = button('Play', () => {
-    void unlockAudio();
+    void unlock();
     engine.play(id);
   });
   const stop = button('Stop', () => engine.stop(id));
   const measureBtn = button('Measure ×10', () => void measure(row));
+  const continuityBtn = button(`Continuity ${CONTINUITY_SEC} s`, () => void continuity(row));
   const buttons = document.createElement('div');
   buttons.className = 'buttons';
-  buttons.append(play, stop, measureBtn);
+  buttons.append(play, stop, measureBtn, continuityBtn);
   const runsEl = document.createElement('div');
   runsEl.className = 'runs';
   el.append(header, buttons, runsEl);
   tracksEl.append(el);
 
-  const row: Row = { id, name, el, status, runsEl, buttons: [play, stop, measureBtn] };
+  const row: Row = { id, name, el, status, runsEl, buttons: [play, stop, measureBtn, continuityBtn] };
   rows.push(row);
 
   makeVoice(ctx, src, meterInput).then(
@@ -290,7 +311,7 @@ async function measure(row: Row): Promise<void> {
   if (measuring || !engine.has(row.id)) return;
   // Inside the tap: resume the context, and play-then-cut once so iOS lets
   // this element play from the timer-driven runs below. Nothing is rendered.
-  const unlocked = unlockAudio();
+  const unlocked = unlock();
   engine.play(row.id);
   cut(row.id);
 
@@ -342,6 +363,54 @@ async function measure(row: Row): Promise<void> {
   renderSummary();
 }
 
+/** Plays one file across piece joins; gaps between clicks should all be 1 s, with no dropouts. */
+async function continuity(row: Row, seconds = CONTINUITY_SEC): Promise<ContinuityResult | undefined> {
+  if (measuring || !engine.has(row.id)) return;
+  const unlocked = unlock(); // inside the tap, as in measure()
+  engine.play(row.id);
+  cut(row.id);
+
+  measuring = true;
+  for (const r of rows) for (const b of r.buttons) b.disabled = true;
+  row.runsEl.textContent = `continuity: playing ${seconds} s…`;
+  let result: ContinuityResult;
+  try {
+    await unlocked;
+    const meter = await meterReady;
+    meterKind = meter.kind;
+    await sleep(GAP_MS);
+    meter.events.length = 0;
+    const tPress = ctx.currentTime;
+    engine.play(row.id);
+    await sleep(seconds * 1000);
+    cut(row.id);
+    const mine = meter.events.filter((e) => e.t >= tPress - 0.02);
+    const clicks = mine.filter((e) => e.kind === 'click').map((e) => e.t);
+    const gaps = clicks.slice(1).map((t, i) => round(t - clicks[i], 6));
+    result = {
+      file: row.name,
+      voice: voiceKind,
+      seconds,
+      clickGapsSec: gaps,
+      maxGapErrorMs: gaps.length ? round(Math.max(...gaps.map((g) => Math.abs(g - 1))) * 1000, 3) : NaN,
+      dropouts: Math.max(0, mine.filter((e) => e.kind === 'signal').length - 1),
+      meter: meterKind,
+      sampleRate: ctx.sampleRate,
+      userAgent: navigator.userAgent,
+    };
+  } finally {
+    measuring = false;
+    for (const r of rows) for (const b of r.buttons) b.disabled = r.el.dataset.ready !== 'true';
+  }
+  row.runsEl.textContent =
+    `continuity: ${result.clickGapsSec.length} click gaps, max error ${result.maxGapErrorMs} ms ` +
+    `(≤ ${MAX_GAP_ERROR_MS}), dropouts ${result.dropouts}`;
+  continuityResults[row.name] = result;
+  window.__continuity = { ...continuityResults };
+  renderSummary();
+  return result;
+}
+
 function round(v: number, digits: number): number {
   const f = 10 ** digits;
   return Math.round(v * f) / f;
@@ -351,7 +420,7 @@ function summarise(file: string, startSec: number, runs: GateRun[], errors: stri
   const delays = runs.map((r) => r.delayMs);
   const landed = runs.map((r) => r.landedSec);
   const has = runs.length > 0;
-  const ctxLatency = ctx as AudioContext & { outputLatency?: number };
+  const l = latencyMs();
   return {
     file,
     voice: voiceKind,
@@ -363,9 +432,8 @@ function summarise(file: string, startSec: number, runs: GateRun[], errors: stri
     meanLandedSec: has ? round(landed.reduce((a, b) => a + b, 0) / landed.length, 4) : NaN,
     meter: meterKind,
     sampleRate: ctx.sampleRate,
-    baseLatencyMs: typeof ctx.baseLatency === 'number' ? round(ctx.baseLatency * 1000, 1) : null,
-    outputLatencyMs:
-      typeof ctxLatency.outputLatency === 'number' ? round(ctxLatency.outputLatency * 1000, 1) : null,
+    baseLatencyMs: l.base,
+    outputLatencyMs: l.output,
     userAgent: navigator.userAgent,
   };
 }
@@ -391,15 +459,47 @@ function renderSummary(): void {
       return tr;
     }),
   );
-  const first = Object.values(gate)[0];
-  $('meta').textContent = first
-    ? `Meter: ${first.meter}. Sample rate ${first.sampleRate} Hz. Base latency ${first.baseLatencyMs ?? 'n/a'} ms, output latency ${first.outputLatencyMs ?? 'n/a'} ms (not included in delay).`
-    : '';
-  resultsEl.value = JSON.stringify({ userAgent: navigator.userAgent, results: gate }, null, 2);
+  $('continuity-summary').replaceChildren(
+    ...Object.values(continuityResults).map((c) => {
+      const tr = document.createElement('tr');
+      tr.append(
+        cell(c.file),
+        cell(`${c.maxGapErrorMs} ms (${c.clickGapsSec.length} gaps)`, c.clickGapsSec.length >= 14 && c.maxGapErrorMs <= MAX_GAP_ERROR_MS),
+        cell(String(c.dropouts), c.dropouts === 0),
+      );
+      return tr;
+    }),
+  );
+  renderMeta();
+  resultsEl.value = resultsText();
+}
+
+function latencyMs(): { base: number | null; output: number | null } {
+  const c = ctx as AudioContext & { outputLatency?: number };
+  return {
+    base: typeof c.baseLatency === 'number' ? round(c.baseLatency * 1000, 1) : null,
+    output: typeof c.outputLatency === 'number' ? round(c.outputLatency * 1000, 1) : null,
+  };
+}
+
+function renderMeta(): void {
+  const l = latencyMs();
+  $('meta').textContent =
+    `Voice: ${voiceKind}. Sample rate ${ctx.sampleRate} Hz. Meter: ${meterKind || 'not started'}. ` +
+    `Base latency ${l.base ?? 'n/a'} ms, output latency ${l.output ?? 'n/a'} ms ` +
+    `(not included in delay: add output latency to max delay and compare with 100 ms).`;
+}
+
+function resultsText(): string {
+  return JSON.stringify(
+    { userAgent: navigator.userAgent, voice: voiceKind, sampleRate: ctx.sampleRate, results: gate, continuity: continuityResults },
+    null,
+    2,
+  );
 }
 
 $('copy').addEventListener('click', () => {
-  const text = resultsEl.value || JSON.stringify({ userAgent: navigator.userAgent, results: gate });
+  const text = resultsEl.value || resultsText();
   const done = (msg: string) => ($('copied').textContent = msg);
   const fallback = () => {
     // Clipboard API needs a secure context; a phone on plain http lands here.
@@ -435,22 +535,10 @@ window.__proto = {
   play: (file) => rowFor(file)?.buttons[0].click(),
   stop: (file) => rowFor(file)?.buttons[1].click(),
   states: () => Object.fromEntries(rows.map((r) => [r.name, engine.state(r.id) ?? 'none'])),
-  // Plays one file for a while; gaps between clicks should all be 1 s, with no dropouts.
   continuity: async (file, seconds) => {
-    const row = rowFor(file)!;
-    await unlockAudio();
-    const meter = await meterReady;
-    meter.events.length = 0;
-    const tPress = ctx.currentTime;
-    engine.play(row.id);
-    await sleep(seconds * 1000);
-    cut(row.id);
-    const mine = meter.events.filter((e) => e.t >= tPress - 0.02);
-    const clicks = mine.filter((e) => e.kind === 'click').map((e) => e.t);
-    return {
-      clickGapsSec: clicks.slice(1).map((t, i) => round(t - clicks[i], 5)),
-      dropouts: Math.max(0, mine.filter((e) => e.kind === 'signal').length - 1),
-    };
+    const result = await continuity(rowFor(file)!, seconds);
+    if (!result) throw new Error('busy or not loaded');
+    return result;
   },
 };
 
@@ -474,4 +562,5 @@ $<HTMLButtonElement>('memtest').addEventListener('click', (e) => {
   for (let n = 1; n <= 20; n++) addRow(`long-4min.mp3 #${n}`, `/tests/fixtures/long-4min.mp3?copy=${n}`);
 });
 
+renderMeta();
 for (const f of FIXTURES) addRow(f, `/tests/fixtures/${f}`);

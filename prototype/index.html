@@ -158,8 +158,8 @@
   <body>
     <h1>Match Music audio gate</h1>
     <p class="note">
-      Dev-only test page. On iPhone, turn the ring/silent switch off. Tap Measure ×10 on each
-      file, then Copy results.
+      Dev-only test page. On iPhone, turn the ring/silent switch off. Tap Measure ×10 and
+      Continuity 16 s on each file, then Copy results.
     </p>
 
     <p id="voice" class="note">Voice:</p>
@@ -188,6 +188,19 @@
           </tr>
         </thead>
         <tbody id="summary"></tbody>
+      </table>
+    </div>
+    <h2>Continuity</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Max click-gap error (≤0.5 ms)</th>
+            <th>Dropouts (0)</th>
+          </tr>
+        </thead>
+        <tbody id="continuity-summary"></tbody>
       </table>
     </div>
     <p id="meta" class="note"></p>

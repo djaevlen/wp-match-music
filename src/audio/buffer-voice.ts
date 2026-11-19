@@ -15,11 +15,18 @@ import type { Voice } from './voice';
 export const ARM_SEC = 3; // decoded and held at the start point, so Play needs no decoding
 export const CHUNK_SEC = 10; // length of each later piece
 export const LOOKAHEAD_SEC = 12; // keep at least this much scheduled ahead of the playhead
+// Refill runs on this timer and also on every piece's 'ended' event, which comes from the
+// audio thread and keeps coming when timers are throttled (hidden tab, locked screen).
 const PUMP_MS = 250;
-// The first piece is scheduled this far ahead so it is never already late when the audio
-// thread sees it (Firefox's currentTime can trail the render position by 256 frames).
-// A late first piece would be clipped and the next piece would jump.
-const START_LEAD_SEC = 0.015;
+// The first piece is scheduled ahead so it is never already late when the audio thread sees
+// it (Firefox's currentTime trails the render position by 256 frames; phones render further
+// ahead). A late first piece would sound late, and the next piece, on time, would overlap it.
+// The lead is the larger of 15 ms and the context's base latency plus one render quantum.
+const MIN_START_LEAD_SEC = 0.015;
+export function startLeadSec(ctx: Pick<BaseAudioContext, 'sampleRate'> & { baseLatency?: number }): number {
+  const quantum = ctx.sampleRate > 0 ? 128 / ctx.sampleRate : 0;
+  return Math.max(MIN_START_LEAD_SEC, (ctx.baseLatency ?? 0) + quantum);
+}
 const SAME_POSITION_SEC = 0.001;
 // Whole frames decoded before a piece and thrown away, so the decoder's bit reservoir and
 // overlap are primed (MPEG-1 reservoir reaches back at most 511 bytes; 12 frames always cover it).
@@ -71,6 +78,7 @@ export function buildBufferVoice(
   const frames = frameOffsets.length;
   const duration = index.durationSec;
   const delay = (index.encoderDelay ?? DEFAULT_ENCODER_DELAY) + DECODER_DELAY;
+  const lead = startLeadSec(ctx);
 
   const gainNode = ctx.createGain();
   gainNode.connect(destination);
@@ -167,12 +175,20 @@ export function buildBufferVoice(
       sources = sources.filter((x) => x !== s);
       s.disconnect();
       if (last) finish(myGen);
+      else pump();
     };
   }
 
   function pump(): void {
     if (!playing || decoding || t0 === null || scheduledUntil >= duration) return;
-    if (scheduledUntil - position() >= lookaheadSec) return;
+    const pos = position();
+    if (scheduledUntil < pos) {
+      // Refill stalled and the scheduled audio ran out. Do not decode what is already late:
+      // carry on from the playhead (or end, if the track's time is up).
+      if (pos >= duration) return finish(gen);
+      scheduledUntil = pos;
+    }
+    if (scheduledUntil - pos >= lookaheadSec) return;
     const myGen = gen;
     const a = scheduledUntil;
     const b = Math.min(duration, a + chunkSec);
@@ -201,7 +217,7 @@ export function buildBufferVoice(
   function begin(p: Piece, myGen: number): void {
     if (myGen !== gen) return;
     if (fromSec >= duration) return finish(myGen);
-    t0 = ctx.currentTime + START_LEAD_SEC;
+    t0 = ctx.currentTime + lead;
     const b = Math.min(duration, fromSec + armSec);
     schedule(p, fromSec, b, myGen);
     scheduledUntil = b;

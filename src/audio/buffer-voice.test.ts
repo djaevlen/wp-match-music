@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildBufferVoice } from './buffer-voice';
+import { buildBufferVoice, startLeadSec } from './buffer-voice';
 import type { Mp3Index } from './mp3-index';
 
 // Synthetic file: 44.1 kHz, 1152-sample frames of 100 bytes, LAME delay 576.
@@ -54,7 +54,7 @@ class FakeSource {
   }
 }
 
-function setup() {
+function setup(ctxExtras: Record<string, number> = {}) {
   const sources: FakeSource[] = [];
   const decodes: Array<{ bytes: number; resolve: () => void }> = [];
   let auto = true;
@@ -62,6 +62,7 @@ function setup() {
   let failNext = false;
   const ctx = {
     currentTime: 100,
+    ...ctxExtras,
     createGain: () => gainNode,
     createBufferSource: () => {
       const s = new FakeSource();
@@ -270,6 +271,64 @@ describe('buffer voice', () => {
     t.voice.start(10);
     expect(t.sources[0]?.started).not.toBeNull();
     err.mockRestore();
+  });
+
+  it('derives the start lead from the context: at least 15 ms, else base latency + one quantum', async () => {
+    expect(startLeadSec({ sampleRate: 48000, baseLatency: 0 })).toBe(0.015);
+    expect(startLeadSec({ sampleRate: 44100 })).toBe(0.015);
+    expect(startLeadSec({ sampleRate: 48000, baseLatency: 0.03 })).toBeCloseTo(0.03 + 128 / 48000, 12);
+
+    const t = setup({ sampleRate: 48000, baseLatency: 0.03 });
+    t.voice.arm(10);
+    await flush();
+    t.voice.start(10);
+    expect(t.sources[0].started![0]).toBeCloseTo(100 + 0.03 + 128 / 48000, 9);
+  });
+
+  it('refills from the pieces\' ended events when timers never fire', async () => {
+    const t = setup();
+    t.voice.arm(0);
+    await flush();
+    t.voice.start(0);
+    await flush();
+    expect(t.sources).toHaveLength(2); // 0-3, 3-13; the refill interval is never advanced
+    t.ctx.currentTime = 100.015 + 3;
+    t.sources[0].onended!();
+    await flush();
+    expect(t.sources).toHaveLength(3);
+    expect(t.sources[2].started![0]).toBeCloseTo(100.015 + 13, 9);
+  });
+
+  it('after a refill stall, carries on from the playhead instead of decoding late audio', async () => {
+    const t = setup();
+    t.voice.arm(0);
+    await flush();
+    t.voice.start(0);
+    await flush();
+    expect(t.decodes).toHaveLength(2); // window 0-3, piece 3-13
+    t.ctx.currentTime = 100.015 + 30; // nothing ran for 27 s; 13-30 has been silent
+    t.sources[1].onended!();
+    await flush();
+    const f0 = firstFrame(30);
+    const f1 = Math.ceil((40 * RATE + DELAY) / SPF) + 4;
+    expect(t.decodes[2].bytes).toBe((f1 - f0) * BYTES); // 30-40, not 13-23
+    const [when, offset, duration] = t.sources[2].started!;
+    expect(when).toBeCloseTo(100.015 + 30, 9);
+    expect(offset).toBeCloseTo(30 - frameTime(f0), 9);
+    expect(duration).toBeCloseTo(10, 9);
+  });
+
+  it('ends when a refill stall outlasts the track', async () => {
+    const t = setup();
+    const ended = vi.fn();
+    t.voice.onEnded(ended);
+    t.voice.arm(0);
+    await flush();
+    t.voice.start(0);
+    await flush();
+    t.ctx.currentTime = 100.015 + index.durationSec + 1;
+    t.sources[1].onended!();
+    expect(ended).toHaveBeenCalledTimes(1);
   });
 
   it('fades from the current level and cancels back to full', async () => {

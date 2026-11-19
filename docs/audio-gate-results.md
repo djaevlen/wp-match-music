@@ -23,7 +23,7 @@ Date: 2026-11-19. Machine: macOS (Apple Silicon), Playwright 1.65.1 (Chromium, F
 
 ## Attempt 1: `<audio>` element voice (`src/audio/element-voice.ts`): FAILED
 
-`GATE_VOICE=element npx playwright test tests/gate`
+`GATE_VOICE=element npx playwright test tests/gate` (that run predates the `rate` parameter). Every element run used the device's default context rate, 48 000 Hz, against the 44.1 kHz files.
 
 | Browser | File | Max delay ms | Spread ms | Mean landing s | Result |
 |---|---|---|---|---|---|
@@ -49,34 +49,61 @@ What was found:
 
 The voice indexes the mp3's frames and decodes the song a few seconds at a time from the stored file. It plays the pieces back to back with `AudioBufferSourceNode`s, scheduled on the audio clock. An idle track holds only 3 s decoded at its start point, so Play needs no decoding. While playing it keeps 12 to 22 s decoded ahead. The fade, the one-track rule and every other 7.4 rule run through the unchanged `Engine`. There is no limit on how long a track plays.
 
-`npx playwright test tests/gate`: 21/21 passed.
+`npx playwright test tests/gate`: 39/39 passed. The gate and continuity tests each run at two context sample rates, forced with `?rate=`. At 48 000 Hz the 44.1 kHz fixtures are resampled (as on most phones), so piece offsets fall between samples. At 44 100 Hz nothing is resampled. Each result below records the rate it ran at.
 
-| Browser | File | Max delay ms | Spread ms | Mean landing s | Result |
+| Browser | Rate Hz | File | Max delay ms | Output latency ms | Spread ms | Mean landing s | Result |
+|---|---|---|---|---|---|---|---|
+| Chromium | 48000 | click-vbr / noxing / cbr | 18.0 / 15.4 / 15.4 | 16 | 0 / 0 / 0 | 10.3003 all | pass |
+| Chromium | 44100 | click-vbr / noxing / cbr | 15.4 / 21.2 / 15.4 | 16 | 0 / 0 / 0 | 10.3003 all | pass |
+| Firefox | 48000 | click-vbr / noxing / cbr | 15.4 / 15.4 / 15.4 | 7.4 | 0 / 0 / 0 | 10.3003 all | pass |
+| Firefox | 44100 | click-vbr / noxing / cbr | 15.4 / 15.4 / 15.4 | 8.2 | 0 / 0 / 0 | 10.3003 all | pass |
+| WebKit | 48000 | click-vbr / noxing / cbr | 15.0 / 15.0 / 15.0 | 1 | 0 / 0 / 0 | 10.3119 all | pass |
+| WebKit | 44100 | click-vbr / noxing / cbr | 15.0 / 15.0 / 15.0 | 1 | 0 / 0 / 0 | 10.3119 all | pass |
+
+Worst max delay plus output latency: Chromium, 21.2 + 16 = 37 ms (limit 100).
+
+Continuity, from the "Continuity 16 s" button: 16 s from 10.3 s, across the piece joins at 13.3 s and 23.3 s.
+
+| Browser | Rate Hz | Max click-gap error ms (vbr / noxing / cbr) | Gaps | Dropouts | Result |
 |---|---|---|---|---|---|
-| Chromium | click-vbr | 15.4 (18.0 in a re-run) | 0 | 10.3003 | pass |
-| Chromium | click-vbr-noxing | 15.4 | 0 | 10.3003 | pass |
-| Chromium | click-cbr | 15.4 | 0 | 10.3003 | pass |
-| Firefox | click-vbr | 15.4 | 0 | 10.3003 | pass |
-| Firefox | click-vbr-noxing | 15.4 | 0 | 10.3003 | pass |
-| Firefox | click-cbr | 15.4 | 0 | 10.3003 | pass |
-| WebKit | click-vbr | 15.0 | 0 | 10.3119 | pass |
-| WebKit | click-vbr-noxing | 15.0 | 0 | 10.3119 | pass |
-| WebKit | click-cbr | 15.0 | 0 | 10.3119 | pass |
+| Chromium | 48000 | 0 / 0 / 0.021 | 15 each | 0 | pass |
+| Chromium | 44100 | 0 / 0 / 0 | 15 each | 0 | pass |
+| Firefox | 48000 | 0 / 0 / 0.021 | 15 each | 0 | pass |
+| Firefox | 44100 | 0 / 0 / 0 | 15 each | 0 | pass |
+| WebKit | 48000 | 0 / 0 / 0 | 15 each | 0 | pass |
+| WebKit | 44100 | 0 / 0 / 0 | 15 each | 0 | pass |
 
-- The delay includes a deliberate 15 ms lead. Without it, Firefox could clip the first piece, and the join to the next piece would jump by 5.3 ms.
+- **Start lead.** The delay includes a deliberate lead before the first piece starts: the larger of 15 ms and the context's base latency plus one 128-frame render quantum. Here every engine's base latency is ≤ 5.4 ms, so the lead is 15 ms on all three. A phone with a larger base latency gets a longer lead, so its first piece is never late; a late first piece would sound late and overlap the next one 3 s later. The "Continuity 16 s" button measures exactly that seam on the device.
+- **Refill.** Refill runs on a 250 ms timer and also on each piece's `ended` event from the audio thread, which keeps arriving when timers are throttled. If refill does stall past the scheduled audio, playback carries on from the playhead rather than decoding the audio it missed (unit-tested).
 - WebKit lands 11.6 ms later than the others, because its mp3 decoder drops the standard 529-sample decoder delay. Between browsers that is well inside 100 ms. It is constant per device, so the editor and match-day Play still agree.
-- **Continuity:** a 16 s play across two piece boundaries (13.3 s, 23.3 s). In every browser and file, clicks are 1.0000 s apart (within 0.02 ms), with no dropouts.
 - **Rapid pressing:** no page errors or unhandled rejections in any browser, and all tracks ready afterwards.
-- **Plain-http fallback (as on a phone):** loading the page via the LAN address drops AudioWorklet, and the ScriptProcessor meter takes over. It read 26 ms delay (the meter's own buffering adds ~10 ms), spread 0, landing 10.3003 s (WebKit 10.3119 s) in all three engines. One of four Chromium continuity runs showed a single 2.67 ms (one render quantum) blip away from any piece boundary. The other three were clean, which points to ScriptProcessor timestamping, not playback.
+- **Plain-http fallback (as on a phone; device default 48 000 Hz; from the first round, before the lead change):** loading the page via the LAN address drops AudioWorklet, and the ScriptProcessor meter takes over. It read 26 ms delay (the meter's own buffering adds ~10 ms), spread 0, landing 10.3003 s (WebKit 10.3119 s) in all three engines. One of four Chromium continuity runs showed a single 2.67 ms (one render quantum) blip away from any piece boundary. The other three were clean, which points to ScriptProcessor timestamping, not playback.
 - **Memory, desktop Chromium:** "Memory test: load 20 × 4-minute track" loads 20 separate copies of a 240 s, 117 kbps file. Settled after forced GC, process memory rose 7 to 13 MB with one track playing; the `<audio>` voice rose 22 to 108 MB. Loading briefly costs more (+90 to +195 MB), because each file is read whole once to index it. This is indicative only; the phone check is the real test.
 
 ## Phone check: pending
 
-To be done with the user (plan Task 2 Step 5). The decoded voice is the default; `?voice=element` shows the first attempt for comparison. "Memory test: load 20 × 4-minute track" needs `scripts/make-fixtures.sh` run first (the long file is generated, not committed).
+To be done with the user (plan Task 2 Step 5). Run `npm run proto` and open the Network URL ending `/prototype/` on the phone, on the same wifi. The decoded voice is the default; `?voice=element` shows the first attempt for comparison. Before the memory test, run `scripts/make-fixtures.sh`: the 4-minute file is generated, not committed.
+
+Instructions for the person testing:
+
+1. On iPhone, turn the ring/silent switch off.
+2. On each of the three click files, tap **Measure ×10**.
+   - **Delay:** add `maxDelayMs` and `outputLatencyMs` (both in the copied results; output latency is also shown under the tables). The sum must be under 100 ms.
+   - **Spread** must be ≤ 20 ms. **Mean landing** must be 10.3 ± 0.1 s.
+3. On each file, tap **Continuity 16 s**: every click gap within 0.5 ms of 1 s, and 0 dropouts. This measures the joins between decoded pieces at 13.3 s and 23.3 s, which only the decoded voice has.
+4. Tap **Copy results** and paste it below. The result includes the sample rate, meter and voice.
+5. Press Play on one track and let it play past 30 s: no gaps, flams or jumps (listen around 13 s and 23 s after Play).
+6. While a track plays, lock the screen once for about 20 s, then unlock: does it still play, and in time?
+7. Tap **Memory test: load 20 × 4-minute track**, then Play/Stop a few of them. Does the page survive, and are Play/Stop still instant? Note memory if the phone shows it (for example Safari Web Inspector, or Chrome remote debugging).
+8. Say whether Play sounds instant and Stop fades smoothly.
+
+Record:
 
 - Device / OS / browser:
-- Copied results (click-vbr, click-vbr-noxing, click-cbr):
-- Play sounds instant? Stop fades smoothly?
-- Any glitch while a track plays on past 13 s and 23 s?
-- Memory test with 20 × 4-minute tracks: page survives? Play/Stop still instant?
+- Copied results (Measure ×10 and Continuity for click-vbr, click-vbr-noxing, click-cbr):
+- maxDelayMs + outputLatencyMs per file:
+- Play instant? Stop fades smoothly?
+- Played past 30 s without a glitch?
+- Screen lock while playing:
+- Memory test (20 × 4-minute): page survives? memory?
 - Decision:
