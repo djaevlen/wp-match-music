@@ -8,3 +8,4 @@ playwright-report
 .DS_Store
 tests/fixtures/long-4min.mp3
 .claude
+.phpunit.result.cache
