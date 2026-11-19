@@ -74,24 +74,26 @@ Use a private/incognito window for the logged-out checks.
 Do: in a private window, open `https://your-site/match-music/`.
 Pass: you land on the WordPress login page, and after logging in you arrive on the board.
 
-**D2. Logged out, a track's audio is closed.**
-Do: upload one track (D5 first), then in the private window open `https://your-site/wp-json/match-music/v1/tracks`.
-Pass: you see an error saying you are not allowed (HTTP 401 or 403), not a list of tracks. Also try `https://your-site/wp-json/match-music/v1/tracks/1/audio` (use a real track number from the board's address data if you know it): it must also be refused.
+**D2. Logged out, the track data and audio are closed.**
+Do: in the private window (not logged in), open `https://your-site/wp-json/match-music/v1/tracks`. Then open `https://your-site/wp-json/match-music/v1/tracks/1/audio`, and a few other small numbers in place of the `1` (2, 3, 4).
+Pass: every one shows an error saying you are not allowed (HTTP 401 or 403), never a list of tracks and never a sound file. The numbers do not need to match real tracks: the site checks who you are before it looks for the track.
 
 **D3. The private folder cannot be browsed.**
 Do: open `https://your-site/wp-content/uploads/match-music-private/`.
-Pass: "Forbidden" or "Not found". You must not see a list of files, and `index.php` there must show nothing.
+Pass: "Forbidden" or "Not found". You must not see a list of files.
 
 **D4. The board is not served from a cache.**
-Do: log in, open the board, and view the page source (right-click > View Page Source). Search for `"nonce"` and note its value. Reload and look again.
-Pass: the value is different on the second view. (If it is identical, a cache is serving the page: go back to A7.) Then open `https://your-site/wp-json/match-music/v1/tracks` while logged in and reload: it should answer each time, with no "cache hit" style header.
+A page cache would hand one person's page to someone else. Test it with two different logged-in people.
+Do: log in as an Editor or Administrator in your normal browser window and open the board. Open a private/incognito window, log in there as a Subscriber (a user with only the Subscriber role) and open the board.
+Pass: the Editor sees the "Add mp3" button and the Subscriber does not. If the Subscriber sees "Add mp3", a cache is serving the Editor's page to other people: go back to A7 and exclude `/match-music/` and logged-in users from the cache.
+Optional second check, for the technically curious: in the Editor window, open the browser's developer tools (press F12, or right-click the page > Inspect), choose the Network tab, reload the board, and click the first request in the list (named `match-music/` or similar). Under Response Headers, `Cache-Control` should contain `no-cache` or `no-store`, and there should be no `Age` header and no `X-Cache: HIT` or `cf-cache-status: HIT` line.
 
 **D5. Upload a real song.**
 Do: as Editor or Administrator, press "Add mp3" and choose a real mp3 of 8 to 12 MB.
-Pass: a new row appears, goes from "loading" to ready, and its Play button works.
+Pass: a new row appears, goes from "loading" to ready, and its Play button works. Do this before D2 if you want D2 to have a track to protect.
 
 **D6. A change on one device shows on another.**
-Do: on one device change a track's start point (Edit > move > Save). On a second device, logged in, refresh the board.
+Do: on one device change a track's start point (press Edit on the track, use the + 0.1 s and + 1 s buttons to move the start point, then press Save). On a second device, logged in, refresh the board.
 Pass: the second device shows the new start point straight away, with no waiting and no stale value. Do it twice, to be sure it is not a cache.
 
 **D7. Deactivating keeps everything; deleting removes everything.**
