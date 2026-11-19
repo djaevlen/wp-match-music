@@ -127,6 +127,7 @@ Pass marks: delay + output latency under 100 ms; spread at most 20 ms; mean land
 - Buffer voice: passes every mark on the phone.
 - Element voice: fails delay and spread on the phone too, confirming the change of technique.
 - Screen lock: the user reports audio stops when the phone is locked (observed during the element-voice run). Accepted by the club as a platform limit; recorded in the spec, section 11.
-- Not yet reported by the user: listening past 30 s by ear, behaviour after unlock, the 20 x 4-minute memory test on the phone.
+- 20 x 4-minute memory test on the phone: the page survived (user report; no memory figure taken).
+- Not yet reported by the user: listening past 30 s by ear, behaviour after unlock.
 
 **Decision: gate passed on measurements. Tasks 6 to 10 may proceed with `createBufferVoice`.**
