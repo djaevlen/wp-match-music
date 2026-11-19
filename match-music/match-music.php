@@ -15,3 +15,7 @@ define( 'MATCH_MUSIC_VERSION', '0.1.0' );
 
 require_once __DIR__ . '/includes/capabilities.php';
 require_once __DIR__ . '/includes/settings.php';
+require_once __DIR__ . '/includes/storage.php';
+require_once __DIR__ . '/includes/tracks.php';
+
+add_action( 'init', 'MatchMusic\register_track_type' );
