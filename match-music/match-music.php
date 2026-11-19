@@ -17,5 +17,8 @@ require_once __DIR__ . '/includes/capabilities.php';
 require_once __DIR__ . '/includes/settings.php';
 require_once __DIR__ . '/includes/storage.php';
 require_once __DIR__ . '/includes/tracks.php';
+require_once __DIR__ . '/includes/rest.php';
 
 add_action( 'init', 'MatchMusic\register_track_type' );
+add_action( 'rest_api_init', 'MatchMusic\register_rest_routes' );
+add_filter( 'rest_pre_serve_request', 'MatchMusic\rest_stream_audio', 10, 3 );
