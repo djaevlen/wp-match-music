@@ -5,6 +5,8 @@ export const strings = {
     loadingProgress: (loaded: number, total: number) => `Loading ${loaded}/${total}`,
     fade: (seconds: string) => `Fade ${seconds} s`,
     noTracks: 'No tracks yet.',
+    unreachable: 'The server could not be reached.',
+    retry: 'Retry',
     logIn: 'Log in',
   },
   row: {

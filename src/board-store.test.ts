@@ -206,6 +206,8 @@ test('a track deleted elsewhere keeps playing, then disappears', async () => {
   vi.advanceTimersByTime(2000);
   expect(s.ids()).toEqual([2, 3]);
   expect(s.voiceOf(1).last()).toEqual(['dispose']);
+  expect(s.prune).not.toHaveBeenCalled(); // pruning waits for a fresh list
+  await s.store.refresh();
   expect(s.prune).toHaveBeenCalledTimes(1);
   expect(s.prune.mock.calls[0][0].map((t: Track) => t.id)).toEqual([2, 3]);
 });
@@ -408,5 +410,137 @@ test('session expiry on a write sets the flag and rethrows', async () => {
   const s = setup([track(1)], { autoLoad: true });
   s.api.saveSettings.mockRejectedValueOnce(new SessionExpiredError());
   await expect(s.store.saveFade(1000)).rejects.toBeInstanceOf(SessionExpiredError);
+  expect(s.store.sessionExpired()).toBe(true);
+});
+
+test('a voice that throws while being installed fails only its row, and the queue keeps going', async () => {
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const s = setup([track(1), track(2)]);
+  s.makeVoice.mockImplementationOnce(async () => {
+    const broken = new FakeVoice(200);
+    broken.arm = () => {
+      throw new Error('arm failed');
+    };
+    return broken;
+  });
+  await s.store.refresh();
+  await s.resolveLoad(1);
+  await s.resolveLoad(2);
+  expect(s.statuses()).toEqual(['error', 'ready']);
+  expect(logged).toHaveBeenCalled();
+  s.store.retry(1);
+  expect(s.statuses()).toEqual(['loading', 'ready']);
+  s.loads.filter((l) => l.track.id === 1).at(-1)!.d.resolve(new Blob(['x']));
+  await flush();
+  expect(s.statuses()).toEqual(['ready', 'ready']);
+  logged.mockRestore();
+});
+
+test('a throwing listener does not stop the board', async () => {
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const s = setup([track(1), track(2)], { autoLoad: true });
+  s.store.subscribe(() => {
+    throw new Error('listener failed');
+  });
+  await s.store.refresh();
+  await flush();
+  expect(s.statuses()).toEqual(['ready', 'ready']);
+  s.store.play(2);
+  expect(s.statuses()).toEqual(['ready', 'playing']);
+  logged.mockRestore();
+});
+
+test('a refresh started before saveFade does not undo it', async () => {
+  const s = setup([track(1)], { autoLoad: true });
+  const settings = deferred<{ fade_ms: number }>();
+  s.api.getSettings.mockReturnValueOnce(settings.promise);
+  const refreshing = s.store.refresh();
+  s.api.saveSettings.mockResolvedValueOnce({ fade_ms: 3500 });
+  await s.store.saveFade(3500);
+  settings.resolve({ fade_ms: 2000 });
+  await refreshing;
+  expect(s.store.fadeMs()).toBe(3500);
+});
+
+test('a deleted track going idle after an upload never prunes the new upload', async () => {
+  const s = setup([track(1), track(2)], { autoLoad: true });
+  await s.store.refresh();
+  await flush();
+  s.store.play(1);
+  s.setServer([track(2)]);
+  await s.store.refresh(); // track 1 still sounding: prune deferred
+  s.api.uploadTrack.mockResolvedValueOnce(track(3));
+  await s.store.upload([new File(['c'], 'c.mp3')], () => {});
+  s.setServer([track(2), track(3)]);
+  s.prune.mockClear();
+  s.store.stop(1);
+  vi.advanceTimersByTime(2000);
+  expect(s.ids()).toEqual([2, 3]);
+  expect(s.prune).not.toHaveBeenCalled();
+  await s.store.refresh();
+  expect(s.prune).toHaveBeenCalledTimes(1);
+  expect(s.prune.mock.calls[0][0].map((t: Track) => t.id)).toEqual([2, 3]);
+});
+
+test('a new server order waits while a track is active', async () => {
+  const s = setup([track(1), track(2), track(3)], { autoLoad: true });
+  await s.store.refresh();
+  await flush();
+  s.store.play(2);
+  s.setServer([track(3, { order: 1 }), track(1, { order: 2 }), track(2, { order: 3 })]);
+  await s.store.refresh();
+  expect(s.ids()).toEqual([1, 2, 3]);
+  s.store.stop(2);
+  expect(s.ids()).toEqual([1, 2, 3]); // still fading
+  vi.advanceTimersByTime(2000);
+  expect(s.ids()).toEqual([3, 1, 2]);
+});
+
+test('a server rename of the playing track waits; other rows rename at once', async () => {
+  const s = setup([track(1), track(2)], { autoLoad: true });
+  await s.store.refresh();
+  await flush();
+  s.store.play(1);
+  s.setServer([track(1, { name: 'Goal' }), track(2, { name: 'Timeout' })]);
+  await s.store.refresh();
+  expect(s.store.rows().map((r) => r.track.name)).toEqual(['Track 1', 'Timeout']);
+  s.store.stop(1);
+  vi.advanceTimersByTime(2000);
+  expect(s.store.rows().map((r) => r.track.name)).toEqual(['Goal', 'Timeout']);
+});
+
+test('local reorder and rename apply at once while a track plays, and stay', async () => {
+  const s = setup([track(1), track(2), track(3)], { autoLoad: true });
+  await s.store.refresh();
+  await flush();
+  s.store.play(1);
+  s.setServer([track(3, { order: 1 }), track(1, { order: 2 }), track(2, { order: 3 })]);
+  await s.store.refresh(); // held server order
+  await s.store.reorder([2, 3, 1]);
+  expect(s.ids()).toEqual([2, 3, 1]);
+  s.api.updateTrack.mockResolvedValueOnce(track(1, { name: 'Goal' }));
+  await s.store.update(1, { name: 'Goal' });
+  expect(s.store.rows().find((r) => r.track.id === 1)!.track.name).toBe('Goal');
+  s.store.stop(1);
+  vi.advanceTimersByTime(2000);
+  expect(s.ids()).toEqual([2, 3, 1]);
+});
+
+test('an unreachable server before the first list is reported until a refresh succeeds', async () => {
+  const s = setup([track(1)], { autoLoad: true });
+  expect(s.store.loadError()).toBe(false);
+  s.api.listTracks.mockRejectedValueOnce(new ApiError('mm_network', 'offline', 0));
+  await s.store.refresh();
+  expect(s.store.loadError()).toBe(true);
+  await s.store.refresh();
+  expect(s.store.loadError()).toBe(false);
+  expect(s.ids()).toEqual([1]);
+});
+
+test('session expiry is not reported as an unreachable server', async () => {
+  const s = setup([track(1)]);
+  s.api.listTracks.mockRejectedValueOnce(new SessionExpiredError());
+  await s.store.refresh();
+  expect(s.store.loadError()).toBe(false);
   expect(s.store.sessionExpired()).toBe(true);
 });

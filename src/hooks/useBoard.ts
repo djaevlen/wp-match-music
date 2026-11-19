@@ -33,13 +33,23 @@ function createStore(): BoardStore {
   );
 }
 
+/** What the hook builds on; tests swap in fakes. */
+export interface BoardEnv {
+  createStore(): BoardStore;
+  /** The shared audio output: its state and its statechange event. */
+  audioContext(): Pick<EventTarget, 'addEventListener' | 'removeEventListener'> & { readonly state: string };
+  unlockAudio(): Promise<void>;
+}
+
+const realEnv: BoardEnv = { createStore, audioContext: getAudioContext, unlockAudio };
+
 /**
  * The board's store, created once. Keeps it in step with the server (on mount, when the page
  * becomes visible, on focus, every minute), unlocks audio on user gestures, cuts the sounding
  * track if the audio output is interrupted, and keeps the screen awake.
  */
-export function useBoard(): BoardStore {
-  const [store] = useState(createStore);
+export function useBoard(env: BoardEnv = realEnv): BoardStore {
+  const [store] = useState(env.createStore);
   const [, rerender] = useReducer((n: number) => n + 1, 0);
 
   useEffect(() => store.subscribe(rerender), [store]);
@@ -68,13 +78,13 @@ export function useBoard(): BoardStore {
     };
     const onFocus = () => void store.refresh();
     // Every gesture, not just the first: iOS can suspend the context again later.
-    const onGesture = () => void unlockAudio().catch(() => {});
+    const onGesture = () => void env.unlockAudio().catch(() => {});
 
     // iOS suspends or interrupts Web Audio when the phone is locked. The music has stopped,
     // so the row must say so: cut the sounding track. A hidden tab alone never stops it.
-    const ctx = getAudioContext();
+    const ctx = env.audioContext();
     const onAudioState = () => {
-      if ((ctx.state as string) !== 'running') store.cutActive();
+      if (ctx.state !== 'running') store.cutActive();
     };
 
     void store.refresh();
@@ -96,7 +106,7 @@ export function useBoard(): BoardStore {
       ctx.removeEventListener('statechange', onAudioState);
       void wakeLock?.release().catch(() => {});
     };
-  }, [store]);
+  }, [store, env]);
 
   return store;
 }

@@ -28,6 +28,7 @@ interface Entry {
   loading: string | null; // version whose download or voice build is in flight
   failed: string | null; // version whose load failed
   pending: { voice: Voice; version: string; blob: Blob } | null; // new voice waiting for the track to go idle
+  heldName: string | null; // server rename of the active track, applied once nothing is active
 }
 
 const keyOf = (tracks: Track[]) =>
@@ -39,6 +40,8 @@ const keyOf = (tracks: Track[]) =>
 /**
  * The board's state: the server's track list, each track's audio, and playback through the
  * engine. Server changes never interrupt a track that is sounding; they land once it is idle.
+ * While any track plays or fades, a new server order (and a rename of that track) waits too,
+ * so the sounding row never moves under the operator's finger.
  */
 export class BoardStore {
   private readonly deps: BoardDeps;
@@ -56,6 +59,8 @@ export class BoardStore {
   private refreshing: Promise<void> | null = null;
   private mutations = 0; // bumped by local writes, so an older list does not undo them
   private serverTracks: Track[] | null = null; // the last list the server sent
+  private heldOrder: number[] | null = null; // server order waiting for nothing to be active
+  private listFailed = false; // the last list request failed (not session expiry)
   private prunedKey: string | null = null;
 
   constructor(deps: BoardDeps, initialFadeMs: number) {
@@ -98,6 +103,11 @@ export class BoardStore {
   /** True once the server has sent a track list. */
   listed(): boolean {
     return this.serverTracks !== null;
+  }
+
+  /** True when no track list has arrived yet and the last attempt could not reach the server. */
+  loadError(): boolean {
+    return !this.listed() && this.listFailed;
   }
 
   sessionExpired(): boolean {
@@ -162,11 +172,14 @@ export class BoardStore {
       this.call(() => this.deps.api.listTracks()),
       this.call(() => this.deps.api.getSettings()),
     ]);
-    if (settings.status === 'fulfilled') this.setFade(settings.value.fade_ms);
-    if (tracks.status === 'fulfilled' && this.mutations === before) {
+    this.listFailed = tracks.status === 'rejected' && !(tracks.reason instanceof SessionExpiredError);
+    // A local write since this refresh began is newer than what it fetched.
+    const fresh = this.mutations === before;
+    if (settings.status === 'fulfilled' && fresh) this.setFade(settings.value.fade_ms);
+    if (tracks.status === 'fulfilled' && fresh) {
       this.serverTracks = tracks.value;
       this.reconcile(tracks.value);
-      this.maybePrune();
+      this.maybePrune(tracks.value);
     }
     this.changed();
   }
@@ -191,6 +204,7 @@ export class BoardStore {
 
   async saveFade(ms: number): Promise<void> {
     const s = await this.call(() => this.deps.api.saveSettings({ fade_ms: ms }));
+    this.mutations++;
     this.setFade(s.fade_ms);
     this.changed();
   }
@@ -204,7 +218,7 @@ export class BoardStore {
       try {
         const t = await this.call(() => this.deps.api.uploadTrack(file, (f) => onProgress(file, f)));
         this.mutations++;
-        this.applyTrack(t);
+        this.applyTrack(t, true);
         if (!this.order.includes(t.id)) this.order.push(t.id);
         this.changed();
         this.pumpDownloads();
@@ -219,7 +233,7 @@ export class BoardStore {
   async update(id: number, patch: { name?: string; start_ms?: number }): Promise<void> {
     const t = await this.call(() => this.deps.api.updateTrack(id, patch));
     this.mutations++;
-    this.applyTrack(t);
+    this.applyTrack(t, true);
     this.changed();
   }
 
@@ -233,16 +247,19 @@ export class BoardStore {
   /** Shows the new order at once; reverts and rethrows if the server refuses it. */
   async reorder(ids: number[]): Promise<void> {
     const before = this.order;
+    const heldBefore = this.heldOrder;
     this.mutations++;
+    this.heldOrder = null; // this user's order replaces any server order still waiting
     this.order = [...ids.filter((id) => this.entries.has(id)), ...before.filter((id) => !ids.includes(id))];
     this.changed();
     try {
       const tracks = await this.call(() => this.deps.api.saveOrder(ids));
       this.mutations++;
-      for (const t of tracks) this.applyTrack(t);
+      for (const t of tracks) this.applyTrack(t, true);
       this.changed();
     } catch (err) {
       this.order = before;
+      this.heldOrder = heldBefore;
       this.changed();
       throw err;
     }
@@ -276,20 +293,57 @@ export class BoardStore {
 
   private reconcile(tracks: Track[]): void {
     const serverIds = new Set(tracks.map((t) => t.id));
-    for (const t of tracks) this.applyTrack(t);
+    for (const t of tracks) this.applyTrack(t, false);
     for (const id of [...this.entries.keys()]) if (!serverIds.has(id)) this.dropTrack(id);
 
-    // Server order; a deleted track that is still sounding keeps its place until it goes.
-    const next = tracks.map((t) => t.id);
-    this.order.forEach((id, index) => {
-      if (!serverIds.has(id) && this.entries.has(id)) next.splice(Math.min(index, next.length), 0, id);
-    });
-    this.order = next;
+    const serverOrder = tracks.map((t) => t.id);
+    if (this.deps.engine.activeId() === null) {
+      this.order = this.ordered(serverOrder);
+    } else {
+      // Hold the server order; new tracks join at the end, where they move nothing.
+      this.heldOrder = serverOrder;
+      this.order = [...this.order, ...serverOrder.filter((id) => !this.order.includes(id))];
+    }
     this.pumpDownloads();
   }
 
-  /** Takes in the server's view of one track: new, renamed, re-timed or a new file. */
-  private applyTrack(t: Track): void {
+  /**
+   * The rows in `serverOrder`. A deleted track that is still sounding keeps its place until
+   * it goes; tracks the list does not know yet (uploaded since) stay at the end.
+   */
+  private ordered(serverOrder: number[]): number[] {
+    const next = serverOrder.filter((id) => this.entries.has(id));
+    this.order.forEach((id, index) => {
+      if (!next.includes(id) && this.entries.get(id)?.gone) next.splice(Math.min(index, next.length), 0, id);
+    });
+    for (const id of this.order) if (!next.includes(id) && this.entries.has(id)) next.push(id);
+    return next;
+  }
+
+  /** Server changes held while a track was active land once nothing is. */
+  private releaseHeld(): boolean {
+    if (this.deps.engine.activeId() !== null) return false;
+    let released = false;
+    for (const e of this.entries.values()) {
+      if (e.heldName !== null) {
+        e.track = { ...e.track, name: e.heldName };
+        e.heldName = null;
+        released = true;
+      }
+    }
+    if (this.heldOrder) {
+      this.order = this.ordered(this.heldOrder);
+      this.heldOrder = null;
+      released = true;
+    }
+    return released;
+  }
+
+  /**
+   * Takes in one track: new, renamed, re-timed or a new file. `local` is true for this user's
+   * own edits, which apply at once; a server rename of the active track waits.
+   */
+  private applyTrack(t: Track, local: boolean): void {
     const e = this.entries.get(t.id);
     if (!e) {
       this.entries.set(t.id, {
@@ -301,11 +355,18 @@ export class BoardStore {
         loading: null,
         failed: null,
         pending: null,
+        heldName: null,
       });
       return;
     }
     const startChanged = e.track.start_ms !== t.start_ms;
-    e.track = t;
+    if (!local && this.deps.engine.activeId() === t.id && t.name !== e.track.name) {
+      e.heldName = t.name;
+      e.track = { ...t, name: e.track.name };
+    } else {
+      e.heldName = null;
+      e.track = t;
+    }
     if (startChanged && this.deps.engine.has(t.id)) this.deps.engine.setStartMs(t.id, t.start_ms); // deferred while active
     const latest = e.wanted ?? e.pending?.version ?? e.voiceVersion ?? e.failed;
     if (latest !== t.version) {
@@ -348,8 +409,12 @@ export class BoardStore {
         e.wanted = null;
         e.failed = version;
       }
-      this.changed();
-      this.pumpDownloads();
+      try {
+        this.changed();
+        this.pumpDownloads();
+      } catch (err) {
+        console.error('Board update failed', err);
+      }
     };
 
     e.loading = version;
@@ -358,29 +423,35 @@ export class BoardStore {
       (blob) => {
         this.downloads--;
         this.pumpDownloads();
+        // Each link catches everything, so one bad file never stalls the loads behind it.
         this.voiceQueue = this.voiceQueue.then(async () => {
-          if (!isCurrent()) {
-            e.loading = null;
-            this.pumpDownloads();
-            return;
-          }
-          let voice: Voice;
+          let voice: Voice | null = null;
+          let installed = false;
           try {
+            if (!isCurrent()) {
+              e.loading = null;
+              this.pumpDownloads();
+              return;
+            }
             voice = await this.deps.makeVoice(blob);
+            e.loading = null;
+            if (!isCurrent()) {
+              voice.dispose();
+              this.pumpDownloads();
+              return;
+            }
+            e.wanted = null;
+            this.install(e, voice, version, blob);
+            installed = true;
+            this.pumpDownloads();
           } catch (err) {
             console.error('Could not prepare track audio', err);
-            fail();
-            return;
+            if (!installed) {
+              if (voice) this.discardBroken(e, voice, version);
+              e.wanted = version; // so fail() sees this load as current and marks the row
+              fail();
+            }
           }
-          e.loading = null;
-          if (!isCurrent()) {
-            voice.dispose();
-            this.pumpDownloads();
-            return;
-          }
-          e.wanted = null;
-          this.install(e, voice, version, blob);
-          this.pumpDownloads();
         });
       },
       () => {
@@ -401,10 +472,28 @@ export class BoardStore {
       return;
     }
     if (state) engine.remove(id); // idle: disposes the old voice
+    engine.add(id, voice, e.track.start_ms);
     e.voiceVersion = version;
     e.blob = blob;
-    engine.add(id, voice, e.track.start_ms);
     this.changed();
+  }
+
+  /**
+   * A voice that failed while being installed: make sure the engine does not keep it. The
+   * engine holds a track before arming it, so a voice whose arm threw is in there.
+   */
+  private discardBroken(e: Entry, voice: Voice, version: string): void {
+    try {
+      if (e.pending?.voice === voice) e.pending = null;
+      else if (this.deps.engine.state(e.track.id) === 'ready' && e.voiceVersion !== version) {
+        this.deps.engine.remove(e.track.id);
+        e.voiceVersion = null;
+        e.blob = null;
+      }
+      voice.dispose();
+    } catch (err) {
+      console.error('Could not discard track audio', err);
+    }
   }
 
   private onEngineChange(): void {
@@ -417,6 +506,7 @@ export class BoardStore {
       }
     }
     this.sweep();
+    this.releaseHeld();
     this.changed();
   }
 
@@ -432,26 +522,32 @@ export class BoardStore {
     }
     if (dropped) {
       this.order = this.order.filter((id) => this.entries.has(id));
-      this.maybePrune();
       this.changed();
     }
   }
 
   /**
-   * Removes cached audio of tracks no longer on the server. Only with a list the server sent,
-   * and only once no deleted track is still sounding.
+   * Removes cached audio of tracks no longer on the server, given the list a refresh has just
+   * fetched (every track on the server). Waits for a later refresh while a deleted track is
+   * still sounding.
    */
-  private maybePrune(): void {
-    if (!this.serverTracks) return;
+  private maybePrune(serverTracks: Track[]): void {
     for (const e of this.entries.values()) if (e.gone) return;
-    const key = keyOf(this.serverTracks);
+    const key = keyOf(serverTracks);
     if (key === this.prunedKey) return;
     this.prunedKey = key;
-    this.deps.prune(this.serverTracks).catch(() => {});
+    this.deps.prune(serverTracks).catch(() => {});
   }
 
+  /** Tells listeners; one that throws is logged and never stops the others or the store. */
   private changed(): void {
     this.cachedRows = null;
-    for (const l of [...this.listeners]) l();
+    for (const l of [...this.listeners]) {
+      try {
+        l();
+      } catch (err) {
+        console.error('Board listener failed', err);
+      }
+    }
   }
 }

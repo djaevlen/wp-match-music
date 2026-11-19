@@ -1,6 +1,7 @@
 import { getBoot } from '@/boot';
 import { useBoard } from '@/hooks/useBoard';
 import { strings } from '@/strings';
+import { Button } from '@/components/ui/button';
 import { TrackList } from './TrackList';
 
 const chip = 'rounded-md border px-2 py-0.5 text-xs whitespace-nowrap text-muted-foreground tabular-nums';
@@ -34,6 +35,15 @@ export function Board() {
           <a className="font-medium underline underline-offset-4" href={boot.loginUrl}>
             {strings.board.logIn}
           </a>
+        </div>
+      )}
+
+      {store.loadError() && (
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          <span>{strings.board.unreachable}</span>
+          <Button variant="outline" size="sm" onClick={() => void store.refresh()}>
+            {strings.board.retry}
+          </Button>
         </div>
       )}
 
