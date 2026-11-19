@@ -9,6 +9,7 @@
     "proto": "vite --host",
     "test:php": "wp-env run tests-cli --env-cwd=wp-content/mm-dev vendor/bin/phpunit",
     "build": "vite build",
+    "zip": "npm run build && node scripts/zip.mjs",
     "test:e2e": "npm run build && playwright test tests/e2e"
   },
   "devDependencies": {
