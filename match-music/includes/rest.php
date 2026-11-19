@@ -268,6 +268,39 @@ function audio_stream_path( $result, $request ): ?string {
 	return track_file( $result->track_id() );
 }
 
+/**
+ * Ends output buffers down to $floor, so the mp3 goes out unaltered. Counted, and it stops at
+ * a buffer PHP will not remove (one started without the removable flag), so it never spins
+ * until the time limit and never raises a notice into the stream.
+ */
+function clear_output_buffers( int $floor = 0 ): void {
+	for ( $level = ob_get_level(); $level > $floor; $level-- ) {
+		$status = ob_get_status();
+		$flags  = isset( $status['flags'] ) ? (int) $status['flags'] : PHP_OUTPUT_HANDLER_REMOVABLE;
+		if ( ! ( $flags & PHP_OUTPUT_HANDLER_REMOVABLE ) || ! ob_end_clean() ) {
+			break;
+		}
+	}
+}
+
+/** Tells page-cache plugins (WP Super Cache, W3TC, LiteSpeed and others) not to keep this response. */
+function disable_page_cache(): void {
+	if ( ! defined( 'DONOTCACHEPAGE' ) ) {
+		define( 'DONOTCACHEPAGE', true );
+	}
+}
+
+/**
+ * Every request to the plugin's routes, refused or not, is personal: never page-cached.
+ * Hooked to rest_request_before_callbacks, which runs once a route matched, before its checks.
+ */
+function rest_no_page_cache( $response, $handler, $request ) {
+	if ( $request instanceof \WP_REST_Request && 0 === strpos( $request->get_route(), '/' . REST_NAMESPACE . '/' ) ) {
+		disable_page_cache();
+	}
+	return $response;
+}
+
 /** Streams the mp3 for a successful audio response instead of JSON-encoding it. */
 function rest_stream_audio( $served, $result, $request ) {
 	if ( $served ) {
@@ -278,9 +311,7 @@ function rest_stream_audio( $served, $result, $request ) {
 		return $served;
 	}
 
-	while ( ob_get_level() > 0 ) {
-		ob_end_clean();
-	}
+	clear_output_buffers();
 	foreach ( $result->get_headers() as $name => $value ) {
 		header( $name . ': ' . $value );
 	}

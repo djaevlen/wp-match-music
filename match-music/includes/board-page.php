@@ -85,6 +85,7 @@ function render_board(): void {
 		wp_die( esc_html__( 'Sorry, you are not allowed to open the board.', 'match-music' ), '', [ 'response' => 403 ] );
 	}
 
+	disable_page_cache();
 	nocache_headers();
 	header( 'X-Robots-Tag: noindex, nofollow' );
 	header( 'Content-Type: text/html; charset=' . get_option( 'blog_charset' ) );

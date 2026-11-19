@@ -261,6 +261,48 @@ class RestTest extends WP_UnitTestCase {
 		$this->assertFalse( apply_filters( 'rest_pre_serve_request', false, $result, $options, $server ) );
 	}
 
+	public function test_plugin_routes_switch_off_page_caching() {
+		wp_set_current_user( $this->subscriber );
+		$this->dispatch( 'GET', '/settings' );
+		$this->assertTrue( defined( 'DONOTCACHEPAGE' ) && DONOTCACHEPAGE );
+	}
+
+	public function test_clear_output_buffers_removes_buffers_above_the_floor() {
+		$floor = ob_get_level();
+		ob_start();
+		echo 'notice from another plugin';
+		ob_start();
+		echo 'more';
+		MatchMusic\clear_output_buffers( $floor );
+		$this->assertSame( $floor, ob_get_level() );
+	}
+
+	public function test_clear_output_buffers_stops_at_a_buffer_it_cannot_remove() {
+		// In a separate PHP process: PHPUnit itself cannot cope with a buffer that cannot be removed.
+		$script = wp_tempnam( 'mm-ob' );
+		file_put_contents(
+			$script,
+			'<?php
+			namespace {
+				define( "ABSPATH", __DIR__ );
+				class WP_REST_Response {}
+				require $argv[1];
+				ob_start( null, 0, PHP_OUTPUT_HANDLER_STDFLAGS & ~PHP_OUTPUT_HANDLER_REMOVABLE );
+				ob_start();
+				echo "junk";
+				\MatchMusic\clear_output_buffers();
+				fwrite( STDERR, "level=" . ob_get_level() );
+			}'
+		);
+		$rest = dirname( __DIR__, 2 ) . '/match-music/includes/rest.php';
+		$cmd  = escapeshellarg( PHP_BINARY ) . ' -d max_execution_time=5 -d display_errors=stderr '
+			. escapeshellarg( $script ) . ' ' . escapeshellarg( $rest ) . ' 2>&1';
+		exec( $cmd, $out, $code );
+		unlink( $script );
+		$this->assertSame( 0, $code, implode( "\n", $out ) );
+		$this->assertSame( [ 'level=1' ], $out ); // the top buffer went; the stuck one stayed; no spin, no notice
+	}
+
 	public function test_settings() {
 		$this->assertSame( [ 'fade_ms' => 2000 ], $this->dispatch( 'GET', '/settings' )->get_data() );
 		$this->assertSame( 2500, $this->dispatch( 'PUT', '/settings', [ 'fade_ms' => 2300 ] )->get_data()['fade_ms'] );
