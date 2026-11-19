@@ -1,7 +1,7 @@
 import { useEffect, useReducer, useState } from 'react';
 import { createApi } from '@/api';
 import { buildBufferVoice } from '@/audio/buffer-voice';
-import { getAudioContext, unlockAudio } from '@/audio/context';
+import { audioRunning, getAudioContext, unlockAudio } from '@/audio/context';
 import { Engine } from '@/audio/engine';
 import { loadAudioBlob, pruneCache } from '@/audio/loader';
 import { indexMp3 } from '@/audio/mp3-index';
@@ -10,6 +10,8 @@ import { BoardStore } from '@/board-store';
 import { getBoot } from '@/boot';
 
 const REFRESH_MS = 60_000;
+// Touch activates on pointerup, touchend and click, not on a touch pointerdown; listen to all.
+const GESTURES = ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown'] as const;
 
 /** A voice over the blob the store already holds, so nothing is fetched twice. */
 async function voiceFromBlob(blob: Blob): Promise<Voice> {
@@ -25,6 +27,7 @@ function createStore(): BoardStore {
     {
       api,
       engine: new Engine(),
+      output: { running: audioRunning, unlock: unlockAudio },
       makeVoice: voiceFromBlob,
       loadBlob: (t) => loadAudioBlob(t, api.fetchAudio),
       prune: pruneCache,
@@ -45,8 +48,9 @@ const realEnv: BoardEnv = { createStore, audioContext: getAudioContext, unlockAu
 
 /**
  * The board's store, created once. Keeps it in step with the server (on mount, when the page
- * becomes visible, on focus, every minute), unlocks audio on user gestures, cuts the sounding
- * track if the audio output is interrupted, and keeps the screen awake.
+ * becomes visible, on focus, every minute), unlocks audio on user gestures, tells the store
+ * whenever the audio output changes state (it cuts the sounding track if the output is
+ * interrupted, and starts a Play that was waiting for it), and keeps the screen awake.
  */
 export function useBoard(env: BoardEnv = realEnv): BoardStore {
   const [store] = useState(env.createStore);
@@ -56,18 +60,28 @@ export function useBoard(env: BoardEnv = realEnv): BoardStore {
 
   useEffect(() => {
     let wakeLock: WakeLockSentinel | null = null;
+    let requesting = false;
     let disposed = false;
+    /** Asks for a screen wake lock unless one is held (or being asked for). Best effort. */
     const keepAwake = () => {
+      if (requesting || (wakeLock && !wakeLock.released)) return;
+      if (document.visibilityState === 'hidden') return; // refused while hidden; asked again on visible
       try {
-        navigator.wakeLock?.request('screen').then(
+        const asked = navigator.wakeLock?.request('screen');
+        if (!asked) return;
+        requesting = true;
+        asked.then(
           (lock) => {
+            requesting = false;
             if (disposed) void lock.release().catch(() => {});
             else wakeLock = lock;
           },
-          () => {},
+          () => {
+            requesting = false;
+          },
         );
       } catch {
-        // Wake lock is best effort.
+        requesting = false; // Wake lock is best effort.
       }
     };
 
@@ -77,23 +91,31 @@ export function useBoard(env: BoardEnv = realEnv): BoardStore {
       keepAwake();
     };
     const onFocus = () => void store.refresh();
-    // Every gesture, not just the first: iOS can suspend the context again later.
-    const onGesture = () => void env.unlockAudio().catch(() => {});
-
-    // iOS suspends or interrupts Web Audio when the phone is locked. The music has stopped,
-    // so the row must say so: cut the sounding track. A hidden tab alone never stops it.
-    const ctx = env.audioContext();
-    const onAudioState = () => {
-      if (ctx.state !== 'running') store.cutActive();
+    const onTick = () => {
+      void store.refresh();
+      keepAwake(); // the browser can release the lock while the page is visible (battery saver)
     };
+    // Every gesture, not just the first: iOS can suspend the context again later.
+    const onGesture = () => {
+      env.unlockAudio().then(
+        () => store.outputChanged(),
+        () => {},
+      );
+      keepAwake();
+    };
+
+    // iOS suspends or interrupts Web Audio when the phone is locked. The store cuts the sounding
+    // track then (the row must say the music stopped) and starts a Play waiting for the output
+    // once it runs. A hidden tab alone never stops it.
+    const ctx = env.audioContext();
+    const onAudioState = () => store.outputChanged();
 
     void store.refresh();
     keepAwake();
-    const timer = setInterval(() => void store.refresh(), REFRESH_MS);
+    const timer = setInterval(onTick, REFRESH_MS);
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('focus', onFocus);
-    window.addEventListener('pointerdown', onGesture, true);
-    window.addEventListener('keydown', onGesture, true);
+    for (const type of GESTURES) window.addEventListener(type, onGesture, true);
     ctx.addEventListener('statechange', onAudioState);
 
     return () => {
@@ -101,8 +123,7 @@ export function useBoard(env: BoardEnv = realEnv): BoardStore {
       clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('focus', onFocus);
-      window.removeEventListener('pointerdown', onGesture, true);
-      window.removeEventListener('keydown', onGesture, true);
+      for (const type of GESTURES) window.removeEventListener(type, onGesture, true);
       ctx.removeEventListener('statechange', onAudioState);
       void wakeLock?.release().catch(() => {});
     };

@@ -49,4 +49,14 @@ describe('audio context', () => {
     await unlockAudio();
     expect(ctx.resume).not.toHaveBeenCalled();
   });
+
+  it('audioRunning is true only while the context runs', async () => {
+    const { audioRunning, getAudioContext } = await import('./context');
+    expect(audioRunning()).toBe(false);
+    const ctx = getAudioContext() as unknown as { state: string };
+    ctx.state = 'interrupted';
+    expect(audioRunning()).toBe(false);
+    ctx.state = 'running';
+    expect(audioRunning()).toBe(true);
+  });
 });

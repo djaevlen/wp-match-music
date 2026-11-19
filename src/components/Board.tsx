@@ -27,6 +27,17 @@ export function Board() {
         </div>
       </header>
 
+      {/* Non-blocking: any tap (this one included) starts the audio, and the hint goes. It
+          comes back after an interruption, which also says why the music stopped. */}
+      {store.listed() && !store.audioRunning() && (
+        <div
+          role="status"
+          className="mb-4 rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm font-medium"
+        >
+          {strings.board.enableSound}
+        </div>
+      )}
+
       {store.sessionExpired() && (
         <div
           role="alert"

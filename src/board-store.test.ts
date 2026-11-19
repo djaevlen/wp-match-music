@@ -77,8 +77,14 @@ function setup(initial: Track[], { autoLoad = false } = {}) {
     return voice;
   });
   const prune = vi.fn(async (_keep: Track[]) => {});
+  // The audio output: running unless a test says otherwise.
+  const output = {
+    state: 'running',
+    running: () => output.state === 'running',
+    unlock: vi.fn(async () => {}),
+  };
 
-  const store = new BoardStore({ api: api as unknown as Api, engine, loadBlob, makeVoice, prune }, 2000);
+  const store = new BoardStore({ api: api as unknown as Api, engine, output, loadBlob, makeVoice, prune }, 2000);
 
   const resolveLoad = async (id: number, version = 'a') => {
     const l = loads.find((x) => x.track.id === id && x.track.version === version)!;
@@ -93,7 +99,7 @@ function setup(initial: Track[], { autoLoad = false } = {}) {
     server = tracks.map((t) => ({ ...t }));
   };
 
-  return { store, api, engine, loads, loadBlob, makeVoice, prune, resolveLoad, voiceOf, statuses, ids, setServer,
+  return { store, api, engine, output, loads, loadBlob, makeVoice, prune, resolveLoad, voiceOf, statuses, ids, setServer,
     maxBuilding: () => maxBuilding };
 }
 
@@ -544,3 +550,191 @@ test('session expiry is not reported as an unreachable server', async () => {
   expect(s.store.loadError()).toBe(false);
   expect(s.store.sessionExpired()).toBe(true);
 });
+
+// The first press and the audio output (the shared AudioContext)
+
+/** A store with tracks 1 and 2 ready and the output in `state`. */
+async function readyWithOutput(state: string) {
+  const s = setup([track(1, { start_ms: 10300 }), track(2)], { autoLoad: true });
+  await s.store.refresh();
+  await flush();
+  s.output.state = state;
+  return s;
+}
+
+/** The invariant: the engine never has an active track while the output is not running. */
+function expectInvariant(s: Awaited<ReturnType<typeof readyWithOutput>>) {
+  if (!s.output.running()) expect(s.engine.activeId()).toBeNull();
+}
+
+test('with the output running, Play reaches the engine in the same tick', async () => {
+  const s = await readyWithOutput('running');
+  s.store.play(1);
+  expect(s.engine.state(1)).toBe('playing');
+  expect(s.voiceOf(1).last()).toEqual(['start', 10.3]);
+  expect(s.output.unlock).not.toHaveBeenCalled();
+});
+
+test('with the output not running, Play unlocks at once and waits; the row stays ready', async () => {
+  const s = await readyWithOutput('suspended');
+  const unlocking = deferred<void>();
+  s.output.unlock.mockReturnValueOnce(unlocking.promise);
+  s.store.play(1, 0);
+  expect(s.output.unlock).toHaveBeenCalledTimes(1);
+  expect(s.engine.activeId()).toBeNull();
+  expect(s.statuses()).toEqual(['ready', 'ready']);
+  expect(s.voiceOf(1).names()).not.toContain('start');
+
+  s.output.state = 'running';
+  s.store.outputChanged();
+  expect(s.statuses()).toEqual(['playing', 'ready']);
+  expect(s.voiceOf(1).last()).toEqual(['start', 0]); // the press's own fromMs
+});
+
+test('a waiting Play starts when the unlock resolves', async () => {
+  const s = await readyWithOutput('suspended');
+  const unlocking = deferred<void>();
+  s.output.unlock.mockReturnValueOnce(unlocking.promise);
+  s.store.play(1);
+  s.output.state = 'running';
+  unlocking.resolve();
+  await flush();
+  expect(s.statuses()).toEqual(['playing', 'ready']);
+});
+
+test('a failed unlock leaves the press waiting and raises nothing', async () => {
+  const s = await readyWithOutput('suspended');
+  s.output.unlock.mockRejectedValueOnce(new Error('not allowed'));
+  s.store.play(1);
+  await flush();
+  expect(s.statuses()).toEqual(['ready', 'ready']);
+});
+
+test('a waiting Play older than about a second is dropped', async () => {
+  const s = await readyWithOutput('suspended');
+  s.output.unlock.mockReturnValueOnce(new Promise(() => {}));
+  s.store.play(1);
+  vi.advanceTimersByTime(1500);
+  s.output.state = 'running';
+  s.store.outputChanged();
+  expect(s.statuses()).toEqual(['ready', 'ready']);
+  expect(s.voiceOf(1).names()).not.toContain('start');
+  // and it does not come back on a later change
+  s.store.outputChanged();
+  expect(s.engine.activeId()).toBeNull();
+});
+
+test('Stop cancels a waiting Play', async () => {
+  const s = await readyWithOutput('suspended');
+  s.store.play(1);
+  s.store.stop(1);
+  s.output.state = 'running';
+  s.store.outputChanged();
+  expect(s.engine.activeId()).toBeNull();
+});
+
+test('another Play replaces a waiting Play', async () => {
+  const s = await readyWithOutput('suspended');
+  s.store.play(1);
+  s.store.play(2);
+  s.output.state = 'running';
+  s.store.outputChanged();
+  expect(s.statuses()).toEqual(['ready', 'playing']);
+  expect(s.voiceOf(1).names()).not.toContain('start');
+});
+
+test('a Play once the output runs cancels a waiting Play', async () => {
+  const s = await readyWithOutput('suspended');
+  s.store.play(1);
+  s.output.state = 'running';
+  s.store.play(2);
+  s.store.outputChanged();
+  expect(s.statuses()).toEqual(['ready', 'playing']);
+  expect(s.voiceOf(1).names()).not.toContain('start');
+});
+
+test('cutActive drops a waiting Play', async () => {
+  const s = await readyWithOutput('suspended');
+  s.store.play(1);
+  s.store.cutActive();
+  s.output.state = 'running';
+  s.store.outputChanged();
+  expect(s.engine.activeId()).toBeNull();
+});
+
+test('a waiting Play for a track deleted meanwhile is dropped', async () => {
+  const s = await readyWithOutput('suspended');
+  s.store.play(1);
+  s.setServer([track(2)]);
+  await s.store.refresh();
+  expect(s.ids()).toEqual([2]);
+  s.output.state = 'running';
+  s.store.outputChanged();
+  expect(s.engine.activeId()).toBeNull();
+});
+
+test('an interrupted blip between the press and running does not lose the press', async () => {
+  const s = await readyWithOutput('suspended');
+  s.store.play(1);
+  s.output.state = 'interrupted';
+  s.store.outputChanged();
+  expect(s.engine.activeId()).toBeNull();
+  s.output.state = 'running';
+  s.store.outputChanged();
+  expect(s.statuses()).toEqual(['playing', 'ready']);
+});
+
+test('a genuine interruption still cuts the sounding track, and it does not restart', async () => {
+  const s = await readyWithOutput('running');
+  s.store.play(1);
+  s.output.state = 'interrupted';
+  s.store.outputChanged();
+  expect(s.statuses()).toEqual(['ready', 'ready']);
+  expect(s.voiceOf(1).calls.slice(-2)).toEqual([['halt'], ['arm', 10.3]]);
+  s.output.state = 'running';
+  s.store.outputChanged();
+  expect(s.engine.activeId()).toBeNull();
+});
+
+test('a fade is cut when the output stops running', async () => {
+  const s = await readyWithOutput('running');
+  s.store.play(1);
+  s.store.stop(1);
+  s.output.state = 'suspended';
+  s.store.outputChanged();
+  expect(s.statuses()).toEqual(['ready', 'ready']);
+});
+
+test('the engine never has an active track while the output is not running', async () => {
+  const s = await readyWithOutput('suspended');
+  const steps: Array<() => void> = [
+    () => s.store.play(1),
+    () => { s.output.state = 'interrupted'; s.store.outputChanged(); },
+    () => { s.output.state = 'running'; s.store.outputChanged(); },
+    () => s.store.play(2),
+    () => { s.output.state = 'interrupted'; s.store.outputChanged(); },
+    () => s.store.play(1),
+    () => s.store.play(2, 0),
+    () => { s.output.state = 'suspended'; s.store.outputChanged(); },
+    () => s.store.stop(2),
+    () => { s.output.state = 'running'; s.store.outputChanged(); },
+    () => s.store.stop(2),
+    () => { s.output.state = 'suspended'; s.store.outputChanged(); },
+  ];
+  for (const step of steps) {
+    step();
+    expectInvariant(s);
+  }
+});
+
+test('audioRunning reports the output and outputChanged notifies', async () => {
+  const s = await readyWithOutput('suspended');
+  expect(s.store.audioRunning()).toBe(false);
+  const fn = vi.fn();
+  s.store.subscribe(fn);
+  s.output.state = 'running';
+  s.store.outputChanged();
+  expect(s.store.audioRunning()).toBe(true);
+  expect(fn).toHaveBeenCalled();
+});
+

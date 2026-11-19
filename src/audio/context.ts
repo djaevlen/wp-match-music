@@ -16,3 +16,8 @@ export function unlockAudio(): Promise<void> {
   const ctx = getAudioContext();
   return ctx.state === 'running' ? Promise.resolve() : ctx.resume();
 }
+
+/** True while the shared context is running, so a voice started now sounds at once. */
+export function audioRunning(): boolean {
+  return getAudioContext().state === 'running';
+}

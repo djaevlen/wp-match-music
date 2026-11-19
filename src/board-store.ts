@@ -9,15 +9,28 @@ export interface BoardRow {
   status: RowStatus;
 }
 
+/** The audio output (the shared AudioContext): whether it is running, and a way to start it. */
+export interface AudioOutput {
+  running(): boolean;
+  /** Starts the output; must be called inside a user gesture to succeed. */
+  unlock(): Promise<void>;
+}
+
 export interface BoardDeps {
   api: Api;
   engine: Engine;
+  output: AudioOutput;
   makeVoice(blob: Blob): Promise<Voice>;
   loadBlob(t: Track): Promise<Blob>;
   prune(keep: Track[]): Promise<void>;
 }
 
 const PARALLEL_DOWNLOADS = 3;
+/**
+ * How long a Play pressed while the output was not running may wait for it to start. A jingle
+ * that starts seconds after the press is worse than one that does not start at all.
+ */
+export const PENDING_PRESS_MS = 1000;
 
 interface Entry {
   track: Track; // latest data from the server
@@ -55,6 +68,7 @@ export class BoardStore {
   private downloads = 0;
   private voiceQueue: Promise<void> = Promise.resolve(); // voices are built one at a time
   private playedFromMs = new Map<number, number>();
+  private pendingPress: { id: number; fromMs?: number; at: number } | null = null; // Play waiting for the output
 
   private refreshing: Promise<void> | null = null;
   private mutations = 0; // bumped by local writes, so an older list does not undo them
@@ -114,6 +128,11 @@ export class BoardStore {
     return this.expired;
   }
 
+  /** True while the audio output is running, so Play sounds at once. */
+  audioRunning(): boolean {
+    return this.deps.output.running();
+  }
+
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => {
@@ -136,20 +155,67 @@ export class BoardStore {
   }
 
   // Playback
+  //
+  // Invariant: the engine never has an active track while the output is not running. Play
+  // reaches the engine only when the output runs; otherwise the press waits (briefly) for it.
+  // When the output stops running (iOS interruption, phone locked), the sounding track is cut,
+  // so its row never claims to play in silence.
 
   play(id: number, fromMs?: number): void {
+    if (!this.entries.has(id) || !this.deps.engine.has(id)) return;
+    if (this.deps.output.running()) {
+      // The normal path: synchronous from the click to the engine.
+      this.pendingPress = null;
+      this.start(id, fromMs);
+      return;
+    }
+    // Not running (first press of the page, or after an interruption): hold the press, and ask
+    // for the output while still inside the user's gesture. The row stays ready meanwhile.
+    this.pendingPress = { id, fromMs, at: Date.now() };
+    this.deps.output.unlock().then(
+      () => this.outputChanged(),
+      () => {},
+    );
+  }
+
+  stop(id: number): void {
+    if (this.pendingPress?.id === id) this.pendingPress = null;
+    this.deps.engine.stop(id);
+  }
+
+  /** Silences whatever is sounding at once, with no fade, and drops a waiting Play. */
+  cutActive(): void {
+    this.pendingPress = null;
+    this.cutSounding();
+  }
+
+  /**
+   * The audio output changed state (or an unlock settled). Running: a Play pressed less than
+   * PENDING_PRESS_MS ago starts now; an older one is dropped. Not running: the sounding track
+   * is cut; a fresh waiting Play is kept, since the output may only be passing through
+   * `interrupted` or `suspended` on its way to running.
+   */
+  outputChanged(): void {
+    const press = this.pendingPress;
+    if (press && Date.now() - press.at > PENDING_PRESS_MS) this.pendingPress = null;
+    if (this.deps.output.running()) {
+      const waiting = this.pendingPress;
+      this.pendingPress = null;
+      if (waiting) this.start(waiting.id, waiting.fromMs);
+    } else {
+      this.cutSounding();
+    }
+    this.changed();
+  }
+
+  private start(id: number, fromMs?: number): void {
     const e = this.entries.get(id);
     if (!e || !this.deps.engine.has(id)) return;
     this.playedFromMs.set(id, fromMs ?? e.track.start_ms);
     this.deps.engine.play(id, fromMs);
   }
 
-  stop(id: number): void {
-    this.deps.engine.stop(id);
-  }
-
-  /** Silences whatever is sounding at once, with no fade (the audio output was interrupted). */
-  cutActive(): void {
+  private cutSounding(): void {
     const id = this.deps.engine.activeId();
     if (id !== null) this.deps.engine.cut(id);
   }
@@ -379,6 +445,7 @@ export class BoardStore {
   private dropTrack(id: number): void {
     const e = this.entries.get(id);
     if (!e) return;
+    if (this.pendingPress?.id === id) this.pendingPress = null;
     e.gone = true;
     e.wanted = null;
     if (e.pending) {

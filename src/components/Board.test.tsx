@@ -14,6 +14,7 @@ function fakeStore(overrides: Partial<Record<keyof BoardStore, unknown>> = {}) {
     listed: () => false,
     loadError: () => false,
     sessionExpired: () => false,
+    audioRunning: () => true,
     refresh: vi.fn(async () => {}),
     play: vi.fn(),
     stop: vi.fn(),
@@ -60,6 +61,22 @@ test('session expiry shows a log-in link', () => {
   render(<Board />);
   expect(screen.getByRole('alert')).toHaveTextContent('The session has expired.');
   expect(screen.getByRole('link', { name: 'Log in' })).toHaveAttribute('href', '/wp-login.php?redirect_to=board');
+});
+
+test('asks for a tap while the audio is not running', () => {
+  fakeStore({ listed: () => true, audioRunning: () => false });
+  render(<Board />);
+  expect(screen.getByRole('status')).toHaveTextContent('Tap anywhere to enable sound');
+});
+
+test('no tap hint once the audio runs, or before the list arrives', () => {
+  fakeStore({ listed: () => true, audioRunning: () => true });
+  const { unmount } = render(<Board />);
+  expect(screen.queryByText('Tap anywhere to enable sound')).toBeNull();
+  unmount();
+  fakeStore({ listed: () => false, audioRunning: () => false });
+  render(<Board />);
+  expect(screen.queryByText('Tap anywhere to enable sound')).toBeNull();
 });
 
 test('header shows the fade and loading progress', () => {

@@ -192,17 +192,23 @@ export interface StatusChange {
   id: number;
   status: string;
   t: number; // performance.now() in the page
+  audio: string; // state of the page's audio context when the change was seen ('' if none yet)
 }
 
 /** Starts recording every row's data-status change in the page, with timestamps. */
 export async function recordStatuses(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const w = window as unknown as { __statuses: StatusChange[] };
+    const w = window as unknown as { __statuses: StatusChange[]; __mutedContexts?: BaseAudioContext[] };
     w.__statuses = [];
     new MutationObserver((records) => {
       for (const r of records) {
         const el = r.target as HTMLElement;
-        w.__statuses.push({ id: Number(el.dataset.trackId), status: el.dataset.status ?? '', t: performance.now() });
+        w.__statuses.push({
+          id: Number(el.dataset.trackId),
+          status: el.dataset.status ?? '',
+          t: performance.now(),
+          audio: w.__mutedContexts?.[0]?.state ?? '',
+        });
       }
     }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['data-status'] });
   });

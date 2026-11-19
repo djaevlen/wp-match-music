@@ -8,6 +8,7 @@ export const strings = {
     unreachable: 'The server could not be reached.',
     retry: 'Retry',
     logIn: 'Log in',
+    enableSound: 'Tap anywhere to enable sound',
   },
   row: {
     play: 'Play',

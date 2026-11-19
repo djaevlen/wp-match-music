@@ -52,8 +52,10 @@ test('play, fade, ready', async ({ page }) => {
   await button(page, a, strings.row.play).click();
   await expect(r).toHaveAttribute('data-status', 'playing');
   await expect(r).toContainText(/\d:\d\d playing/);
-  // Web Audio really runs (its clock moves), into a muted output. The Play press is the
-  // page's first gesture, so the context is still resuming when the row turns 'playing'.
+  // Web Audio really runs (its clock moves), into a muted output. When the Play press is the
+  // page's first gesture, the row turns 'playing' only once the context runs (see "Play as the
+  // first gesture" below); Chromium carries the login click's activation over, so it may
+  // already run here.
   await expect.poll(async () => (await mutedAudio(page))[0]?.state).toBe('running');
   const [first] = await mutedAudio(page);
   expect(first.muted).toBe(true);
@@ -72,6 +74,42 @@ test('play, fade, ready', async ({ page }) => {
   const faded = after[1].t - after[0].t;
   expect(faded).toBeGreaterThanOrEqual(FADE_MS - 50);
   expect(faded).toBeLessThanOrEqual(FADE_MS + 1_000);
+});
+
+/** Reloads the board, so the page has had no gesture yet and its audio is not running. */
+async function reloadWithoutGesture(page: Page): Promise<void> {
+  await page.reload();
+  await waitForBoard(page);
+  await expect(row(page, a)).toHaveAttribute('data-status', 'ready');
+  expect((await mutedAudio(page))[0].state).not.toBe('running');
+}
+
+const soundHint = (page: Page) => page.getByRole('status').filter({ hasText: strings.board.enableSound });
+
+test('a fresh page asks for a tap, and a tap anywhere clears the hint', async ({ page }) => {
+  await openBoard(page);
+  await reloadWithoutGesture(page);
+  await expect(soundHint(page)).toBeVisible();
+
+  await page.getByRole('heading', { name: strings.appTitle }).click();
+  await expect(soundHint(page)).toBeHidden();
+  expect((await mutedAudio(page))[0].state).toBe('running');
+});
+
+test('Play as the first gesture: the row never says playing before the audio runs', async ({ page }) => {
+  await openBoard(page);
+  await reloadWithoutGesture(page);
+  await recordStatuses(page);
+
+  await button(page, a, strings.row.play).click();
+  await expect(row(page, a)).toHaveAttribute('data-status', 'playing');
+  await expect(soundHint(page)).toBeHidden();
+  const playing = (await statusesOf(page, a)).filter((s) => s.status === 'playing');
+  expect(playing).toHaveLength(1);
+  expect(playing[0].audio).toBe('running');
+
+  await button(page, a, strings.row.stop).click();
+  await expect(row(page, a)).toHaveAttribute('data-status', 'ready', { timeout: FADE_MS + 1_000 });
 });
 
 test('one track at a time', async ({ page }) => {
