@@ -397,3 +397,11 @@ What replaces it, and where the rest of this document is now out of date:
   as a timer, so a hidden tab or locked screen should not starve it; this is
   part of the phone check.
 - Measured results live in `docs/audio-gate-results.md`.
+
+### Locking the phone **(decided, 2026-11-19)**
+
+On an iPhone, locking the screen stops the music: iOS suspends Web Audio when the
+screen locks, and Web Audio is the only way to fade on iOS. The club accepts
+this. The board keeps the screen awake while it is open (7.8), so the phone does
+not lock by itself; only pressing the lock button stops the music. Playing on
+through a locked screen is a non-goal.
