@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-19-match-music-design.md`. Read it before any task. Section numbers below refer to it.
 
+> **Amendment after Task 2 (audio gate):** the `<audio>`-element voice failed the gate. The product voice is `createBufferVoice(ctx, src, destination?)` in `src/audio/buffer-voice.ts`, same `Voice` interface. Wherever Tasks 7 to 10 say `createElementVoice`, use `createBufferVoice`. Load tracks' audio one at a time per file when building voices (each load reads the whole file once to index it). See spec section 11.
+
 ## Global Constraints
 
 - WordPress 6.4+, PHP 7.4+. No PHP 8-only syntax. Single site only.

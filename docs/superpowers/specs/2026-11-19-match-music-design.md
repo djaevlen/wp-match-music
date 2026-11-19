@@ -372,3 +372,28 @@ in a form that works on either.
 - Download concurrency and the exact refresh interval.
 - Exact visual styling within shadcn defaults, following the approved mockups in
   `.superpowers/brainstorm/`.
+
+## 11. Amendment, 2026-11-19: outcome of the audio gate
+
+The gate in section 8 was run and the `<audio>`-element technique chosen in
+section 6 failed it in every browser engine tested (Chromium: about 200 ms delay
+on a VBR file and a landing point 165 ms off; Firefox: no sound on a VBR file
+without a Xing header; WebKit: landing spread of 0.65 to 1.46 s). As section 8
+allows, the technique was changed without changing any behaviour in 7.4.
+
+What replaces it, and where the rest of this document is now out of date:
+
+- Each track's mp3 is indexed frame by frame. A short window at the start point
+  (about 3 s) is decoded and held in memory, so Play needs no decoding. Once
+  playing, later pieces are decoded just ahead of the playhead and scheduled
+  sample-accurately. Nothing is decoded in full, so memory stays small.
+- Section 6, "How audio is played", option 1 and sections 7.6 and 7.8 say
+  "`<audio>` element". Read them as "the track's voice". Everything else in 7.8
+  stands: files are fetched once, kept in Cache Storage, and playback needs no
+  network once loaded.
+- The fade still runs through a Web Audio gain node.
+- New risk taken on: playback beyond the first seconds depends on pieces being
+  topped up while the track plays. It is topped up from the audio clock as well
+  as a timer, so a hidden tab or locked screen should not starve it; this is
+  part of the phone check.
+- Measured results live in `docs/audio-gate-results.md`.
