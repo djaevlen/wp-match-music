@@ -47,6 +47,10 @@ export interface Api {
 
 const NONCE_EXPIRED = 'rest_cookie_invalid_nonce';
 
+/** A request fails when nothing arrives for this long, so a hung one is retried, not waited on. */
+const API_TIMEOUT_MS = 15_000;
+const AUDIO_TIMEOUT_MS = 60_000;
+
 /** Error for a non-2xx reply: expired session, or the server's own code and message. */
 function errorFor(status: number, text: string): Error {
   if (status === 401) {
@@ -60,7 +64,49 @@ function errorFor(status: number, text: string): Error {
   } catch {
     // Not JSON: fall through.
   }
+  if (status === 413) {
+    // The web server itself (nginx client_max_body_size, for example) refused the upload.
+    return new ApiError('mm_too_large_server', strings.errors.tooLargeForServer, status);
+  }
   return new ApiError('mm_bad_response', strings.errors.httpStatus(status), status);
+}
+
+/**
+ * fetch() that is aborted once nothing has arrived for `idleMs`: no reply, or a body that
+ * stops sending. A slow body that keeps moving is never cut. A timed-out fetch rejects; a
+ * body that stalls makes its read reject.
+ */
+async function fetchWithTimeout(url: string, init: RequestInit, idleMs: number): Promise<Response> {
+  const controller = new AbortController();
+  let timer = setTimeout(() => controller.abort(), idleMs);
+  const restart = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => controller.abort(), idleMs);
+  };
+  let res: Response;
+  try {
+    res = await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    clearTimeout(timer);
+    throw err;
+  }
+  if (!res.body) {
+    clearTimeout(timer);
+    return res;
+  }
+  restart();
+  const body = res.body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, out) {
+        restart();
+        out.enqueue(chunk);
+      },
+      flush() {
+        clearTimeout(timer);
+      },
+    }),
+  );
+  return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
 }
 
 function isNonceExpired(error: Error): boolean {
@@ -79,7 +125,7 @@ export function createApi(boot: Boot): Api {
   async function refreshNonce(): Promise<void> {
     let res: Response;
     try {
-      res = await fetch(boot.nonceUrl, { credentials: 'same-origin' });
+      res = await fetchWithTimeout(boot.nonceUrl, { credentials: 'same-origin' }, API_TIMEOUT_MS);
     } catch {
       throw networkError();
     }
@@ -107,18 +153,22 @@ export function createApi(boot: Boot): Api {
     }
   }
 
-  function request(route: string, method = 'GET', body?: unknown): Promise<Response> {
+  function request(route: string, method = 'GET', body?: unknown, idleMs = API_TIMEOUT_MS): Promise<Response> {
     return withNonceRetry(async () => {
       const headers: Record<string, string> = { 'X-WP-Nonce': nonce };
       if (body !== undefined) headers['Content-Type'] = 'application/json';
       let res: Response;
       try {
-        res = await fetch(urlFor(route), {
-          method,
-          headers,
-          credentials: 'same-origin',
-          body: body === undefined ? undefined : JSON.stringify(body),
-        });
+        res = await fetchWithTimeout(
+          urlFor(route),
+          {
+            method,
+            headers,
+            credentials: 'same-origin',
+            body: body === undefined ? undefined : JSON.stringify(body),
+          },
+          idleMs,
+        );
       } catch {
         throw networkError();
       }
@@ -179,7 +229,7 @@ export function createApi(boot: Boot): Api {
       await request(`tracks/${id}`, 'DELETE');
     },
     saveOrder: (ids) => json<Track[]>('tracks/order', 'PUT', { ids }),
-    fetchAudio: (id) => request(`tracks/${id}/audio`),
+    fetchAudio: (id) => request(`tracks/${id}/audio`, 'GET', undefined, AUDIO_TIMEOUT_MS),
     getSettings: () => json<Settings>('settings'),
     saveSettings: (s) => json<Settings>('settings', 'PUT', s),
   };

@@ -163,6 +163,84 @@ describe('api', () => {
     await expect(createApi(boot).listTracks()).rejects.toMatchObject({ status: 502 });
   });
 
+  /** A fetch that never answers, and rejects as fetch does once its signal aborts. */
+  const hangingFetch = (_url: string, init: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+    });
+
+  it('a request that hangs fails after about 15 s', async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockImplementation(hangingFetch);
+      const result = createApi(boot).listTracks().catch((e) => e);
+      await vi.advanceTimersByTimeAsync(14_000);
+      expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await result).toMatchObject({ code: 'mm_network' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('settings and the nonce refresh time out too', async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockImplementation(hangingFetch);
+      const settings = createApi(boot).getSettings().catch((e) => e);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(await settings).toMatchObject({ code: 'mm_network' });
+
+      fetchMock.mockReset();
+      fetchMock
+        .mockResolvedValueOnce(json({ code: 'rest_cookie_invalid_nonce', message: 'x', data: { status: 403 } }, 403))
+        .mockImplementation(hangingFetch);
+      const list = createApi(boot).listTracks().catch((e) => e);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(await list).toMatchObject({ code: 'mm_network' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('an audio download that stops sending data fails after about 60 s', async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockImplementation(async (_url: string, init: RequestInit) => {
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array([1, 2]));
+            init.signal?.addEventListener('abort', () => controller.error(new DOMException('Aborted', 'AbortError')));
+            setTimeout(() => controller.enqueue(new Uint8Array([3])), 50_000); // still moving at 50 s
+          },
+        });
+        return new Response(body, { headers: { 'Content-Type': 'audio/mpeg' } });
+      });
+      const res = await createApi(boot).fetchAudio(7);
+      let settled = false;
+      const blob = res.blob().then(
+        (b) => b,
+        (e) => e,
+      ).finally(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(100_000); // 50 s after the last data
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await blob).toMatchObject({ name: 'AbortError' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a non-JSON 413 from the web server says the file is too large for the server', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('<html><h1>413 Request Entity Too Large</h1></html>', { status: 413 }));
+    await expect(createApi(boot).listTracks()).rejects.toMatchObject({
+      status: 413,
+      message: 'The file is too large for the server to accept.',
+    });
+  });
+
   it('fetchAudio returns the raw response', async () => {
     fetchMock.mockResolvedValueOnce(new Response(new Uint8Array([1, 2, 3])));
     const res = await createApi(boot).fetchAudio(7);
@@ -261,6 +339,16 @@ describe('uploadTrack', () => {
     FakeXhr.responses = [{ status: 0, body: null }];
     FakeXhr.abort = true;
     await expect(createApi(boot).uploadTrack(file(10), vi.fn())).rejects.toMatchObject({ code: 'mm_network' });
+  });
+
+  it('a non-JSON 413 on upload says the file is too large for the server', async () => {
+    FakeXhr.responses = [{ status: 413, body: null }];
+    FakeXhr.rawBody = '<html><center><h1>413 Request Entity Too Large</h1></center><hr>nginx</html>';
+    await expect(createApi(boot).uploadTrack(file(10), vi.fn())).rejects.toMatchObject({
+      code: 'mm_too_large_server',
+      status: 413,
+      message: 'The file is too large for the server to accept.',
+    });
   });
 
   it('maps server errors and an expired session', async () => {
