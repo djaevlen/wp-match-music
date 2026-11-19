@@ -41,6 +41,11 @@ Pass: either there is none, or it is set so that **pages for logged-in users are
 Where: Site Health > Info > Server shows "Web server".
 Pass: you know which one it is. If it is **nginx**, read the nginx note in section E before you finish.
 
+**A9. Who can get an account on the site?**
+Any logged-in account, whatever its role, can open the board, play the tracks and download the club's mp3 files. So every person who can get an account can get the music.
+Where: Settings > General > Membership: is "Anyone can register" ticked? Also look in the Plugins list for anything that creates accounts by itself: a shop (WooCommerce), a forum, a membership or newsletter plugin.
+Pass: the club has decided. Either nobody can sign themselves up (the box is not ticked and no plugin creates accounts), or the club accepts that everyone with an account can play and download the tracks. If neither is acceptable, play access can be limited to a stricter role through the plugin's `match_music_play_capability` filter; changing it needs a developer. Write down what was decided.
+
 ## B. Install and activate
 
 **B1. Upload the plugin.**
@@ -59,7 +64,7 @@ If the address shows your site's "page not found" page, go to Settings > Permali
 
 ## C. Who can do what
 
-- **Play and stop** (open the board, press Play, press Stop): any logged-in user, whatever their role (Subscriber, Contributor, Author, Editor, Administrator).
+- **Play and stop** (open the board, press Play, press Stop): any logged-in user, whatever their role (Subscriber, Contributor, Author, Editor, Administrator). See A9.
 - **Edit** (add, rename, reorder and delete tracks, set start points, change the fade): Editors and Administrators only.
 - Not logged in: the board sends you to the login page.
 - A logged-in user whose account has no role gets a plain "forbidden" page.
@@ -76,21 +81,23 @@ Pass: you land on the WordPress login page, and after logging in you arrive on t
 
 **D2. Logged out, the track data and audio are closed.**
 Do: in the private window (not logged in), open `https://your-site/wp-json/match-music/v1/tracks`. Then open `https://your-site/wp-json/match-music/v1/tracks/1/audio`, and a few other small numbers in place of the `1` (2, 3, 4).
+If permalinks are "Plain" (A6), use these addresses instead: `https://your-site/?rest_route=/match-music/v1/tracks` and `https://your-site/?rest_route=/match-music/v1/tracks/1/audio` (again with 2, 3, 4 in place of the `1`).
 Pass: every one shows an error saying you are not allowed (HTTP 401 or 403), never a list of tracks and never a sound file. The numbers do not need to match real tracks: the site checks who you are before it looks for the track.
 
-**D3. The private folder cannot be browsed.**
-Do: open `https://your-site/wp-content/uploads/match-music-private/`.
-Pass: "Forbidden" or "Not found". You must not see a list of files.
-
-**D4. The board is not served from a cache.**
+**D3. The board is not served from a cache.**
 A page cache would hand one person's page to someone else. Test it with two different logged-in people.
 Do: log in as an Editor or Administrator in your normal browser window and open the board. Open a private/incognito window, log in there as a Subscriber (a user with only the Subscriber role) and open the board.
 Pass: the Editor sees the "Add mp3" button and the Subscriber does not. If the Subscriber sees "Add mp3", a cache is serving the Editor's page to other people: go back to A7 and exclude `/match-music/` and logged-in users from the cache.
 Optional second check, for the technically curious: in the Editor window, open the browser's developer tools (press F12, or right-click the page > Inspect), choose the Network tab, reload the board, and click the first request in the list (named `match-music/` or similar). Under Response Headers, `Cache-Control` should contain `no-cache` or `no-store`, and there should be no `Age` header and no `X-Cache: HIT` or `cf-cache-status: HIT` line.
 
-**D5. Upload a real song.**
+**D4. Upload a real song.**
 Do: as Editor or Administrator, press "Add mp3" and choose a real mp3 of 8 to 12 MB.
 Pass: a new row appears, goes from "loading" to ready, and its Play button works. Do this before D2 if you want D2 to have a track to protect.
+
+**D5. The private folder cannot be browsed.**
+Do this after D4: the folder is only created when the first song is uploaded, so before that the check passes without testing anything.
+Do: open `https://your-site/wp-content/uploads/match-music-private/`.
+Pass: "Forbidden", "Not found", or a blank white page (normal on nginx: the folder holds an empty `index.php`). You must not see a list of files, and nothing must play or download.
 
 **D6. A change on one device shows on another.**
 Do: on one device change a track's start point (press Edit on the track, use the + 0.1 s and + 1 s buttons to move the start point, then press Save). On a second device, logged in, refresh the board.
@@ -110,7 +117,7 @@ location ^~ /wp-content/uploads/match-music-private/ {
 }
 ```
 
-The board plays the songs through the plugin, so this rule does not stop it working. Pass: D3 shows "Forbidden" (403). On Apache hosts you do not need this.
+The board plays the songs through the plugin, so this rule does not stop it working. Pass: D5 shows "Forbidden" (403). On Apache hosts you do not need this.
 
 ## F. Checks on real devices
 
@@ -121,8 +128,8 @@ Do: open the board on each, wait until the header stops saying "Loading", press 
 Pass: sound starts the instant you press Play (no noticeable lag). Stop fades out smoothly.
 
 **F2. First press after opening the board makes sound.**
-Do: on each phone, open the board fresh, wait until all tracks are ready, and press Play once, as the very first thing you touch.
-Pass: the track plays on that first press. You do not have to press twice.
+Do: on each phone, open the board fresh, wait until all tracks are ready, and press Play once, as the very first thing you touch (ignore the "Tap anywhere to enable sound" hint for this check).
+Pass: the track plays on that first press, within a moment, and the row says playing only once you hear it. You do not have to press twice. If it does not play, write it down: the match-day rule "tap once before the match" (section G) then matters even more.
 
 **F3. A track plays on past 30 seconds.**
 Do: play a long track (3 minutes or more) and listen to the whole first minute, especially around 13 seconds and 23 seconds.
@@ -160,7 +167,46 @@ Pass: the editor opens within a few seconds and shows the waveform. You can move
 Do: on the laptop, play a track. Drag an mp3 file from your desktop or a folder onto the board page and drop it.
 Pass: the music keeps playing and the browser does not leave the page or start playing the file by itself. (As Editor it may add the track; as a Subscriber nothing happens. Both are fine.)
 
-## G. Results
+**F12. Swipes and double taps do not reload or zoom the board.**
+Do: on each phone, play a track. Scroll to the top of the list and swipe down firmly, as if to refresh the page. Then double-tap quickly on a Play or Stop button and on an empty part of the page.
+Pass: the page does not reload or zoom, and the music keeps playing (a tap on Stop may stop it, which is fine). Do this in Safari and, if the club uses it, Chrome on the iPhone.
+
+**F13. The "Tap anywhere to enable sound" hint appears and clears.**
+Do: open the board fresh on each phone. Then tap anywhere on the page, for example on the title "Match music".
+Pass: the hint shows when the board opens (on some laptops it never shows, which is fine), and it disappears after the one tap. After locking and unlocking the phone (F8) it shows again, and one tap clears it again.
+
+**F14. Interruptions other than locking.**
+Do: play a track, then (one at a time) take a phone call or FaceTime call, switch to another app and back, and connect a Bluetooth speaker or headphones after the board is open.
+Pass: after each one the board tells the truth: a row says playing only if you hear it. If the hint is back, one tap clears it, and the next Play works.
+
+**F15. Long use: 50 presses over 20 minutes.**
+Do: on the phone the club will use, press Play and Stop about 50 times over 20 minutes, on different tracks, as during a match.
+Pass: every Play sounds at once, nothing slows down, and the page never reloads or goes blank. This is the only check that stands in for a whole match.
+
+**F16. Press-to-sound on the phone, by ear.**
+Do: on each phone, with all tracks ready, press Play on several tracks and listen.
+Pass: sound starts the instant you press Play, as on the laptop in F1. No noticeable lag.
+
+**F17. An Android phone, if the club has one.**
+Do: repeat F2 to F16 on an Android phone with Chrome.
+Pass: as for the iPhone. Write "n/a" if the club has no Android phone.
+
+**F18. Low Power Mode.**
+Do: switch on Low Power Mode (iPhone: Settings > Battery; Android: battery saver), then repeat F7.
+Pass: the screen still stays awake while the board is open. If it does not, the club must keep Low Power Mode off on match days.
+
+## G. Match-day rules
+
+Tell everyone who runs the music:
+
+- Connect the speaker (Bluetooth or cable) **before** opening the board.
+- On an iPhone, keep the ring/silent switch off (no orange showing).
+- Open the board before the match, wait until the header stops saying "Loading", and **tap once anywhere** so the "Tap anywhere to enable sound" hint goes away.
+- Do not lock the phone during the match: locking stops the music (F8). The board keeps the screen awake by itself.
+- If the hint comes back during the match (after a call or another interruption), the music has stopped: tap once anywhere, then press Play again.
+- Do not add, edit, reorder or delete tracks during a match. Do that before or after.
+
+## H. Results
 
 Fill this in as you go.
 
@@ -177,10 +223,12 @@ Fill this in as you go.
 | Permalink setting (A6) | |
 | Page cache plugin / CDN, and what was excluded (A7) | |
 | Web server; nginx rule added? (A8, E) | |
+| Open registration: what was decided (A9) | |
 | Installed and activated (B1 to B3) | |
-| Logged-out checks D1 to D3 | |
-| Not cached (D4) | |
-| Real upload worked (D5) | |
+| Logged-out checks D1 and D2 | |
+| Not cached (D3) | |
+| Real upload worked (D4) | |
+| Private folder not browsable (D5) | |
 | Second device saw the change (D6) | |
 
 Devices
@@ -192,6 +240,14 @@ Devices
 | Laptop Safari | | | | | | | | | | | | |
 | Phone 1: | | | | | | | | | | | | |
 | Phone 2: | | | | | | | | | | | | |
+
+| Device and browser | Version | F12 | F13 | F14 | F15 | F16 | F17 | F18 |
+|---|---|---|---|---|---|---|---|---|
+| Phone 1: | | | | | | | | |
+| Phone 2: | | | | | | | | |
+| Android phone: | | | | | | | | |
+
+Release zip sha256 (from the build report): 
 
 Write pass, fail or n/a in each box. Notes on anything that did not pass:
 
