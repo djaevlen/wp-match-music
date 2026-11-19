@@ -1,0 +1,61 @@
+import { Engine } from './engine';
+import type { Voice } from './voice';
+
+class FakeVoice implements Voice {
+  calls: [string, number?][] = [];
+  private ended: (() => void) | null = null;
+  constructor(readonly durationSec: number) {}
+  private rec(name: string, arg?: number) {
+    this.calls.push(arg === undefined ? [name] : [name, arg]);
+  }
+  arm(s: number) { this.rec('arm', s); }
+  start(s: number) { this.rec('start', s); }
+  halt() { this.rec('halt'); }
+  fadeOut(s: number) { this.rec('fadeOut', s); }
+  cancelFade() { this.rec('cancelFade'); }
+  positionSec() { return 0; }
+  onEnded(cb: () => void) { this.ended = cb; }
+  dispose() { this.rec('dispose'); }
+  fireEnded() { this.ended?.(); }
+  last() { return this.calls[this.calls.length - 1]; }
+  names() { return this.calls.map((c) => c[0]); }
+}
+
+beforeEach(() => { vi.useFakeTimers(); });
+afterEach(() => { vi.useRealTimers(); });
+
+const setup = () => { const e = new Engine(); const a = new FakeVoice(200), b = new FakeVoice(200);
+  e.add(1, a, 42300); e.add(2, b, 5000); e.setFadeMs(2000); return { e, a, b }; };
+
+test('add arms at the start point', () => { expect(setup().a.calls).toEqual([['arm', 42.3]]); });
+test('play starts from the start point', () => { const { e, a } = setup(); e.play(1);
+  expect(a.last()).toEqual(['start', 42.3]); expect(e.state(1)).toBe('playing'); expect(e.activeId()).toBe(1); });
+test('stop fades, then halts and re-arms', () => { const { e, a } = setup(); e.play(1); e.stop(1);
+  expect(a.last()).toEqual(['fadeOut', 2]); expect(e.state(1)).toBe('fading');
+  vi.advanceTimersByTime(2000);
+  expect(a.calls.slice(-2)).toEqual([['halt'], ['arm', 42.3]]); expect(e.state(1)).toBe('ready'); expect(e.activeId()).toBeNull(); });
+test('fade 0 halts at once', () => { const { e, a } = setup(); e.setFadeMs(0); e.play(1); e.stop(1);
+  expect(a.names()).not.toContain('fadeOut'); expect(e.state(1)).toBe('ready'); });
+test('playing another track cuts the first without a fade', () => { const { e, a, b } = setup(); e.play(1); e.play(2);
+  expect(a.names()).not.toContain('fadeOut'); expect(a.calls.slice(-2)).toEqual([['halt'], ['arm', 42.3]]);
+  expect(e.state(1)).toBe('ready'); expect(b.last()).toEqual(['start', 5]); });
+test('playing another track during a fade cancels the pending halt', () => { const { e, a } = setup();
+  e.play(1); e.stop(1); e.play(2); const n = a.calls.length; vi.advanceTimersByTime(5000); expect(a.calls.length).toBe(n); });
+test('play during own fade restarts at full volume', () => { const { e, a } = setup(); e.play(1); e.stop(1); e.play(1);
+  expect(a.calls.slice(-2)).toEqual([['cancelFade'], ['start', 42.3]]); vi.advanceTimersByTime(5000); expect(e.state(1)).toBe('playing'); });
+test('second stop during a fade cuts at once', () => { const { e, a } = setup(); e.play(1); e.stop(1); e.stop(1);
+  expect(a.calls.slice(-2)).toEqual([['halt'], ['arm', 42.3]]); expect(e.state(1)).toBe('ready'); });
+test('stop on an idle track does nothing', () => { const { e, a } = setup(); e.stop(1); expect(a.calls.length).toBe(1); });
+test('ended re-arms', () => { const { e, a } = setup(); e.play(1); a.fireEnded();
+  expect(e.state(1)).toBe('ready'); expect(a.last()).toEqual(['arm', 42.3]); });
+test('fromMs overrides once', () => { const { e, a } = setup(); e.setFadeMs(0); e.play(1, 0);
+  expect(a.last()).toEqual(['start', 0]); e.stop(1); expect(a.last()).toEqual(['arm', 42.3]); });
+test('setStartMs re-arms when idle, waits when active', () => { const { e, a } = setup(); e.setFadeMs(0);
+  e.setStartMs(1, 10000); expect(a.last()).toEqual(['arm', 10]);
+  e.play(1); e.setStartMs(1, 20000); expect(a.last()).toEqual(['start', 10]); e.stop(1); expect(a.last()).toEqual(['arm', 20]); });
+test('remove waits until idle, then disposes', () => { const { e, a } = setup(); e.setFadeMs(0); e.play(1); e.remove(1);
+  expect(e.has(1)).toBe(true); e.stop(1); expect(e.has(1)).toBe(false); expect(a.last()).toEqual(['dispose']); });
+test('A, B, A in one tick leaves only A sounding', () => { const { e, a, b } = setup(); e.play(1); e.play(2); e.play(1);
+  expect(e.activeId()).toBe(1); expect(b.last()).toEqual(['arm', 5]); expect(a.last()).toEqual(['start', 42.3]); });
+test('subscribers hear every state change', () => { const { e } = setup(); const fn = vi.fn(); e.subscribe(fn);
+  e.play(1); e.stop(1); vi.advanceTimersByTime(2000); expect(fn).toHaveBeenCalledTimes(3); });
