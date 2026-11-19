@@ -96,6 +96,37 @@ test('a fresh page asks for a tap, and a tap anywhere clears the hint', async ({
   expect((await mutedAudio(page))[0].state).toBe('running');
 });
 
+for (const size of [
+  { width: 1280, height: 800 },
+  { width: 375, height: 800 },
+]) {
+  test(`the sound hint never moves a row or covers Play (${size.width}px)`, async ({ page }) => {
+    await page.setViewportSize(size);
+    await openBoard(page);
+    await reloadWithoutGesture(page);
+    await expect(soundHint(page)).toBeVisible();
+
+    const before = await row(page, a).boundingBox();
+    const hint = await soundHint(page).boundingBox();
+    const play = await row(page, a)
+      .getByRole('button', { name: strings.row.play, exact: true })
+      .filter({ visible: true })
+      .boundingBox();
+    expect(before && hint && play).toBeTruthy();
+    const overlaps =
+      hint!.x < play!.x + play!.width &&
+      play!.x < hint!.x + hint!.width &&
+      hint!.y < play!.y + play!.height &&
+      play!.y < hint!.y + hint!.height;
+    expect(overlaps).toBe(false);
+
+    await page.getByRole('heading', { name: strings.appTitle }).click();
+    await expect(soundHint(page)).toBeHidden();
+    const after = await row(page, a).boundingBox();
+    expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(1);
+  });
+}
+
 test('Play as the first gesture: the row never says playing before the audio runs', async ({ page }) => {
   await openBoard(page);
   await reloadWithoutGesture(page);

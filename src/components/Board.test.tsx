@@ -72,6 +72,12 @@ test('asks for a tap while the audio is not running', () => {
   expect(screen.getByRole('status')).toHaveTextContent('Tap anywhere to enable sound');
 });
 
+test('the tap hint is a fixed, click-through overlay, not part of the layout flow', () => {
+  fakeStore({ listed: () => true, audioRunning: () => false });
+  render(<Board />);
+  expect(screen.getByRole('status')).toHaveClass('fixed', 'pointer-events-none');
+});
+
 test('no tap hint once the audio runs, or before the list arrives', () => {
   fakeStore({ listed: () => true, audioRunning: () => true });
   const { unmount } = render(<Board />);
