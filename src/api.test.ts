@@ -98,8 +98,38 @@ describe('api', () => {
       .mockResolvedValueOnce(stale())
       .mockResolvedValueOnce(new Response('n2'))
       .mockResolvedValueOnce(stale());
-    await expect(createApi(boot).listTracks()).rejects.toMatchObject({ code: 'rest_cookie_invalid_nonce', status: 403 });
+    await expect(createApi(boot).listTracks()).rejects.toBeInstanceOf(SessionExpiredError);
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('a logged-out nonce refresh is a session expiry and keeps the old nonce', async () => {
+    const stale = () =>
+      json({ code: 'rest_cookie_invalid_nonce', message: 'Cookie check failed', data: { status: 403 } }, 403);
+    fetchMock
+      .mockResolvedValueOnce(stale())
+      .mockResolvedValueOnce(new Response('0', { status: 400 }))
+      .mockResolvedValueOnce(json([track]));
+    const api = createApi(boot);
+    await expect(api.listTracks()).rejects.toBeInstanceOf(SessionExpiredError);
+    await api.listTracks();
+    expect(fetchMock.mock.calls[2][1].headers['X-WP-Nonce']).toBe('n1');
+  });
+
+  it('an empty or 0 nonce body with status 200 is a session expiry', async () => {
+    const stale = () =>
+      json({ code: 'rest_cookie_invalid_nonce', message: 'Cookie check failed', data: { status: 403 } }, 403);
+    fetchMock.mockResolvedValueOnce(stale()).mockResolvedValueOnce(new Response('0'));
+    await expect(createApi(boot).listTracks()).rejects.toBeInstanceOf(SessionExpiredError);
+  });
+
+  it('a network failure rejects with ApiError mm_network', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await expect(createApi(boot).listTracks()).rejects.toMatchObject({ code: 'mm_network', status: 0 });
+  });
+
+  it('a 2xx non-JSON body rejects with ApiError mm_bad_response', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('<b>Notice</b>', { status: 200 }));
+    await expect(createApi(boot).listTracks()).rejects.toMatchObject({ code: 'mm_bad_response', status: 200 });
   });
 
   it('401 throws SessionExpiredError', async () => {
@@ -155,6 +185,10 @@ describe('uploadTrack', () => {
     sent: unknown = null;
     onload: (() => void) | null = null;
     onerror: (() => void) | null = null;
+    onabort: (() => void) | null = null;
+    ontimeout: (() => void) | null = null;
+    static abort = false;
+    static rawBody: string | null = null;
     upload: { onprogress: ((e: { lengthComputable: boolean; loaded: number; total: number }) => void) | null } = {
       onprogress: null,
     };
@@ -173,8 +207,9 @@ describe('uploadTrack', () => {
       const next = FakeXhr.responses.shift()!;
       this.upload.onprogress?.({ lengthComputable: true, loaded: 5, total: 10 });
       this.status = next.status;
-      this.responseText = JSON.stringify(next.body);
-      this.onload?.();
+      this.responseText = FakeXhr.rawBody ?? JSON.stringify(next.body);
+      if (FakeXhr.abort) this.onabort?.();
+      else this.onload?.();
     }
   }
 
@@ -183,6 +218,8 @@ describe('uploadTrack', () => {
   beforeEach(() => {
     instances.length = 0;
     FakeXhr.responses = [];
+    FakeXhr.abort = false;
+    FakeXhr.rawBody = null;
     vi.stubGlobal('XMLHttpRequest', FakeXhr);
     vi.stubGlobal('fetch', vi.fn());
   });
@@ -209,6 +246,21 @@ describe('uploadTrack', () => {
     expect(error.code).toBe('mm_too_large');
     expect(instances).toHaveLength(0);
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects on a 2xx non-JSON body instead of hanging', async () => {
+    FakeXhr.responses = [{ status: 200, body: null }];
+    FakeXhr.rawBody = 'Notice: oops {"id":1}';
+    await expect(createApi(boot).uploadTrack(file(10), vi.fn())).rejects.toMatchObject({
+      code: 'mm_bad_response',
+      status: 200,
+    });
+  });
+
+  it('rejects when the upload is aborted', async () => {
+    FakeXhr.responses = [{ status: 0, body: null }];
+    FakeXhr.abort = true;
+    await expect(createApi(boot).uploadTrack(file(10), vi.fn())).rejects.toMatchObject({ code: 'mm_network' });
   });
 
   it('maps server errors and an expired session', async () => {
