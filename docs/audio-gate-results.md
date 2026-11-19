@@ -80,7 +80,7 @@ Continuity, from the "Continuity 16 s" button: 16 s from 10.3 s, across the piec
 - **Plain-http fallback (as on a phone; device default 48 000 Hz; from the first round, before the lead change):** loading the page via the LAN address drops AudioWorklet, and the ScriptProcessor meter takes over. It read 26 ms delay (the meter's own buffering adds ~10 ms), spread 0, landing 10.3003 s (WebKit 10.3119 s) in all three engines. One of four Chromium continuity runs showed a single 2.67 ms (one render quantum) blip away from any piece boundary. The other three were clean, which points to ScriptProcessor timestamping, not playback.
 - **Memory, desktop Chromium:** "Memory test: load 20 × 4-minute track" loads 20 separate copies of a 240 s, 117 kbps file. Settled after forced GC, process memory rose 7 to 13 MB with one track playing; the `<audio>` voice rose 22 to 108 MB. Loading briefly costs more (+90 to +195 MB), because each file is read whole once to index it. This is indicative only; the phone check is the real test.
 
-## Phone check: pending
+## Phone check: measured pass (2026-11-19)
 
 To be done with the user (plan Task 2 Step 5). Run `npm run proto` and open the Network URL ending `/prototype/` on the phone, on the same wifi. The decoded voice is the default; `?voice=element` shows the first attempt for comparison. Before the memory test, run `scripts/make-fixtures.sh`: the 4-minute file is generated, not committed.
 
@@ -107,3 +107,26 @@ Record:
 - Screen lock while playing:
 - Memory test (20 × 4-minute): page survives? memory?
 - Decision:
+
+
+### Phone results, 2026-11-19
+
+Device: iPhone, iOS 27.0.1, Chrome for iOS 157 (WebKit). Context 48 kHz, base latency 2.7 ms, output latency 12.3 ms. Meter: ScriptProcessor (plain http).
+
+| Voice | File | Max delay | Delay + output latency | Spread | Mean landing | Continuity max gap error | Dropouts |
+|---|---|---|---|---|---|---|---|
+| buffer (product) | click-vbr | 25.7 ms | 38.0 ms | 0 ms | 10.3119 s | 0.021 ms | 0 |
+| buffer (product) | click-vbr-noxing | 25.7 ms | 38.0 ms | 0 ms | 10.3119 s | 0.021 ms | 0 |
+| buffer (product) | click-cbr | 25.7 ms | 38.0 ms | 0 ms | 10.3119 s | 0.021 ms | 0 |
+| element (first attempt) | click-vbr | 508.9 ms | 521.2 ms | 761.3 ms | 10.3742 s | 0 ms | 0 |
+| element (first attempt) | click-vbr-noxing | 504.6 ms | 516.9 ms | 723.5 ms | 10.2546 s | 174.167 ms | 0 |
+| element (first attempt) | click-cbr | 503.7 ms | 516.2 ms | 1388.5 ms | 10.3074 s | 174.146 ms | 0 |
+
+Pass marks: delay + output latency under 100 ms; spread at most 20 ms; mean landing 10.3 ± 0.1 s; continuity within 0.5 ms and 0 dropouts. Phone landing differs from desktop (10.3003 s) by 11.6 ms, inside the 100 ms cross-browser mark.
+
+- Buffer voice: passes every mark on the phone.
+- Element voice: fails delay and spread on the phone too, confirming the change of technique.
+- Screen lock: the user reports audio stops when the phone is locked (observed during the element-voice run). Accepted by the club as a platform limit; recorded in the spec, section 11.
+- Not yet reported by the user: listening past 30 s by ear, behaviour after unlock, the 20 x 4-minute memory test on the phone.
+
+**Decision: gate passed on measurements. Tasks 6 to 10 may proceed with `createBufferVoice`.**
