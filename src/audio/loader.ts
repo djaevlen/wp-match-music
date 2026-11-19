@@ -29,12 +29,17 @@ async function openCache(): Promise<Cache | null> {
   }
 }
 
+/** True when the blob has the size the server reported (0 means the server does not know). */
+const rightSize = (blob: Blob, size: number) => size <= 0 || blob.size === size;
+
 /**
  * The track's mp3 as a Blob: from Cache Storage when present, otherwise
  * downloaded once and stored. Without a working Cache Storage it is a plain fetch.
+ * A download whose size differs from the track's is rejected and never kept (the row shows
+ * its error and Retry), since a cached copy is never fetched again for that version.
  */
 export async function loadAudioBlob(
-  t: TrackRef,
+  t: TrackRef & { size: number },
   fetchAudio: (id: number) => Promise<Response>,
 ): Promise<Blob> {
   askForPersistence();
@@ -44,21 +49,28 @@ export async function loadAudioBlob(
   if (cache) {
     try {
       const hit = await cache.match(key);
-      if (hit) return await hit.blob();
+      if (hit) {
+        const blob = await hit.blob();
+        if (rightSize(blob, t.size)) return blob;
+        await cache.delete(key); // kept before sizes were checked: fetch it again
+      }
     } catch {
       // Treat an unreadable cache as a miss.
     }
   }
 
-  const response = await fetchAudio(t.id);
+  const blob = await (await fetchAudio(t.id)).blob();
+  if (!rightSize(blob, t.size)) {
+    throw new Error(`Track ${t.id}: downloaded ${blob.size} bytes, expected ${t.size}`);
+  }
   if (cache) {
     try {
-      await cache.put(key, response.clone());
+      await cache.put(key, new Response(blob, { headers: { 'Content-Type': blob.type || 'audio/mpeg' } }));
     } catch {
       // Out of quota or blocked: the audio still plays, it just is not kept.
     }
   }
-  return response.blob();
+  return blob;
 }
 
 /** Deletes every cached track that is not in `keep`. */
