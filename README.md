@@ -40,3 +40,38 @@ The zip holds a top-level `match-music/` folder with the PHP files and `build/` 
 - Plan: `docs/superpowers/plans/2026-11-19-match-music.md`
 - Audio gate results: `docs/audio-gate-results.md`
 - Install and device checklist for the club: `docs/install-checklist.md`
+
+## Installing on a WordPress site
+
+Each release on GitHub has a ready-built `match-music.zip`:
+<https://github.com/djaevlen/wp-match-music/releases>
+
+- **By hand:** Plugins > Add New > Upload Plugin, choose the zip, activate.
+- **With Composer** (for example a Bedrock site using `composer/installers`): add this repository entry, then `composer require djaevlen/wp-match-music`. Change both version numbers when a new release comes out.
+
+```json
+{
+  "type": "package",
+  "package": {
+    "name": "djaevlen/wp-match-music",
+    "version": "0.1.0",
+    "type": "wordpress-plugin",
+    "dist": {
+      "url": "https://github.com/djaevlen/wp-match-music/releases/download/v0.1.0/match-music.zip",
+      "type": "zip"
+    },
+    "require": { "composer/installers": "^1.0 || ^2.0" },
+    "extra": { "installer-name": "match-music" }
+  }
+}
+```
+
+Then follow [docs/install-checklist.md](docs/install-checklist.md).
+
+## Releasing
+
+Bump the version in `match-music/match-music.php` (the `Version:` header and `MATCH_MUSIC_VERSION`), commit, then tag and push: `git tag v0.2.0 && git push origin v0.2.0`. The release workflow runs the unit tests, builds the zip and publishes the release.
+
+## License
+
+GPL-2.0-or-later. See [LICENSE](LICENSE).
