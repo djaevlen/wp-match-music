@@ -4,10 +4,12 @@ import {
   boardAs,
   expect,
   login,
+  recordStatuses,
   resetBoard,
   row,
   rowNamed,
   seedTrack,
+  statusesOf,
   strings,
   test,
   trackOrder,
@@ -194,14 +196,25 @@ test('reorder by keyboard', async ({ page }) => {
   // move is repeated until its live region reports the other row; one more ArrowRight from
   // the right column changes nothing.
   await handle.focus();
+  // Space is the board's quick-play key, even with the handle focused: it starts a track and
+  // picks nothing up. Enter picks up and drops.
+  await recordStatuses(page);
   await page.keyboard.press('Space');
+  await expect
+    .poll(async () => [...(await statusesOf(page, ids[0])), ...(await statusesOf(page, ids[1]))].map((s) => s.status))
+    .toContain('playing');
+  await expect(handle).not.toHaveAttribute('aria-pressed', 'true');
+  expect(trackOrder()).toEqual(ids);
+  await expect(page.locator('[data-status="playing"], [data-status="fading"]')).toHaveCount(0, { timeout: 10_000 });
+
+  await page.keyboard.press('Enter');
   await expect(handle).toHaveAttribute('aria-pressed', 'true');
   const overOther = page.getByRole('status').filter({ hasText: `over droppable area ${ids[1]}.` });
   await expect(async () => {
     await page.keyboard.press('ArrowRight');
     await expect(overOther).toHaveCount(1, { timeout: 200 });
   }).toPass();
-  await page.keyboard.press('Space');
+  await page.keyboard.press('Enter');
   expect((await saved).status()).toBe(200);
   expect(trackOrder()).toEqual([ids[1], ids[0]]);
 });

@@ -2,6 +2,10 @@
 
 A login-protected jingle board for a handball club's match days, as a WordPress plugin. Logged-in members press a track to play it, press again to fade it out; Editors upload tracks and set where each one starts. The plugin is PHP (`match-music/`); the board is a React app built by Vite into `match-music/build/`.
 
+## Quick play
+
+On a laptop the space bar is the whistle key: with nothing playing it starts a random track, and while a track plays it fades it out, as Stop does. No track repeats until every track has had a turn. Editors can keep a track (a goal jingle, say) out of the random pick with the **Quick play** switch in the edit dialog; such rows show a small marker. Space types normally in text fields and is left alone while a dialog or menu is open; a focused button is pressed with Enter. Design: `docs/superpowers/specs/2026-11-23-quick-play-design.md`.
+
 ## Run it locally
 
 Needs Docker, Node 22 and PHP/Composer for the PHP tests.

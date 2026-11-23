@@ -96,6 +96,11 @@ export function setFadeMs(ms: number): void {
   wpPhp(`\\MatchMusic\\set_fade_ms( (int) $in );`, ms);
 }
 
+/** Switches a track into or out of the quick-play pool (what Space picks from). */
+export function setQuickPlay(id: number, on: boolean): void {
+  wpPhp(`\\MatchMusic\\update_track( (int) $in['id'], [ 'quick_play' => (bool) $in['on'] ] );`, { id, on });
+}
+
 export function trackOrder(): number[] {
   return JSON.parse(wpPhp(`echo wp_json_encode( wp_list_pluck( \\MatchMusic\\list_tracks(), 'id' ) );`));
 }
