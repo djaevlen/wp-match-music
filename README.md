@@ -58,10 +58,10 @@ Each release on GitHub has a ready-built `match-music.zip`:
   "type": "package",
   "package": {
     "name": "djaevlen/wp-match-music",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "type": "wordpress-plugin",
     "dist": {
-      "url": "https://github.com/djaevlen/wp-match-music/releases/download/v0.1.0/match-music.zip",
+      "url": "https://github.com/djaevlen/wp-match-music/releases/download/v0.2.0/match-music.zip",
       "type": "zip"
     },
     "require": { "composer/installers": "^1.0 || ^2.0" },
