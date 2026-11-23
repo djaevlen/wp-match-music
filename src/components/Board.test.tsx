@@ -20,6 +20,7 @@ function fakeStore(overrides: Partial<Record<keyof BoardStore, unknown>> = {}) {
     stop: vi.fn(),
     retry: vi.fn(),
     elapsedSec: () => 0,
+    quickPlay: vi.fn(() => 'started'),
     ...overrides,
   };
   fake.store = store;
@@ -105,4 +106,13 @@ test('header shows the fade and loading progress', () => {
   render(<Board />);
   expect(screen.getByText('Fade 2.5 s')).toBeInTheDocument();
   expect(screen.getByText('Loading 1/2')).toBeInTheDocument();
+});
+
+test('the header hints at quick play on wide screens only, and Space reaches the store', () => {
+  const store = fakeStore({ listed: () => true });
+  render(<Board />);
+  const hint = screen.getByText('Space: quick play');
+  expect(hint).toHaveClass('hidden', 'sm:inline');
+  fireEvent.keyDown(document.body, { code: 'Space', key: ' ' });
+  expect(store.quickPlay).toHaveBeenCalledTimes(1);
 });

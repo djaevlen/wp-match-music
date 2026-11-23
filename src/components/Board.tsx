@@ -1,5 +1,7 @@
 import { getBoot } from '@/boot';
 import { useBoard } from '@/hooks/useBoard';
+import { useQuickPlayKey } from '@/hooks/useQuickPlayKey';
+import { cn } from '@/lib/utils';
 import { strings } from '@/strings';
 import { Button } from '@/components/ui/button';
 import { Toaster } from '@/components/ui/sonner';
@@ -9,6 +11,7 @@ import { TrackList } from './TrackList';
 
 export function Board() {
   const store = useBoard();
+  useQuickPlayKey(store);
   const boot = getBoot();
   const rows = store.rows();
   const stillLoading = rows.some((r) => r.status === 'loading');
@@ -23,6 +26,8 @@ export function Board() {
               {strings.board.loadingProgress(store.loaded(), store.total())}
             </span>
           )}
+          {/* The key only exists on a keyboard, so the hint stays off phone-width screens. */}
+          <span className={cn(chip, 'hidden sm:inline')}>{strings.board.quickPlayHint}</span>
           <FadeControl store={store} canEdit={boot.canEdit} />
         </div>
       </header>

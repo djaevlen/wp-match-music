@@ -9,6 +9,8 @@ export const strings = {
     retry: 'Retry',
     logIn: 'Log in',
     enableSound: 'Tap anywhere to enable sound',
+    quickPlayHint: 'Space: quick play',
+    quickPlayEmpty: 'No tracks are available for quick play.',
   },
   row: {
     play: 'Play',
