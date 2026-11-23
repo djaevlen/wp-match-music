@@ -50,6 +50,19 @@ function validate_start_ms( $value ) {
 }
 
 /**
+ * Whether Space may pick the track at random. Only a real boolean is accepted, so a form
+ * value such as "false" can never switch a track on by accident.
+ *
+ * @return bool|\WP_Error
+ */
+function validate_quick_play( $value ) {
+	if ( ! is_bool( $value ) ) {
+		return new \WP_Error( 'mm_invalid_quick_play', 'Quick play must be true or false.' );
+	}
+	return $value;
+}
+
+/**
  * Runs a post write without the kses title filter, so a name such as "Home <3" is saved
  * exactly as given. The filter is restored even when a save hook throws.
  */
@@ -127,12 +140,14 @@ function get_track( int $id ): ?array {
 		return null;
 	}
 	return [
-		'id'       => (int) $post->ID,
-		'name'     => $post->post_title,
-		'start_ms' => (int) get_post_meta( $post->ID, '_mm_start_ms', true ),
-		'order'    => (int) $post->menu_order,
-		'size'     => (int) get_post_meta( $post->ID, '_mm_size', true ),
-		'version'  => (string) get_post_meta( $post->ID, '_mm_version', true ),
+		'id'         => (int) $post->ID,
+		'name'       => $post->post_title,
+		'start_ms'   => (int) get_post_meta( $post->ID, '_mm_start_ms', true ),
+		// On unless switched off: a track saved before the setting existed has no value.
+		'quick_play' => '0' !== get_post_meta( $post->ID, '_mm_quick_play', true ),
+		'order'      => (int) $post->menu_order,
+		'size'       => (int) get_post_meta( $post->ID, '_mm_size', true ),
+		'version'    => (string) get_post_meta( $post->ID, '_mm_version', true ),
 	];
 }
 
@@ -160,6 +175,7 @@ function update_track( int $id, array $fields ) {
 
 	$name  = null;
 	$start = null;
+	$quick = null;
 	if ( array_key_exists( 'name', $fields ) ) {
 		$name = validate_name( $fields['name'] );
 		if ( is_wp_error( $name ) ) {
@@ -173,6 +189,13 @@ function update_track( int $id, array $fields ) {
 		}
 	}
 
+	if ( array_key_exists( 'quick_play', $fields ) ) {
+		$quick = validate_quick_play( $fields['quick_play'] );
+		if ( is_wp_error( $quick ) ) {
+			return $quick;
+		}
+	}
+
 	if ( null !== $name ) {
 		write_raw(
 			function () use ( $id, $name ) {
@@ -182,6 +205,9 @@ function update_track( int $id, array $fields ) {
 	}
 	if ( null !== $start ) {
 		update_post_meta( $id, '_mm_start_ms', $start );
+	}
+	if ( null !== $quick ) {
+		update_post_meta( $id, '_mm_quick_play', $quick ? '1' : '0' );
 	}
 	return get_track( $id );
 }

@@ -110,10 +110,12 @@ class RestTest extends WP_UnitTestCase {
 		$id = $this->track();
 		wp_set_current_user( $this->subscriber );
 		$this->dispatch( 'PATCH', "/tracks/$id", [ 'name' => 'Hacked' ] );
+		$this->dispatch( 'PATCH', "/tracks/$id", [ 'quick_play' => false ] );
 		$this->dispatch( 'DELETE', "/tracks/$id" );
 		$this->dispatch( 'PUT', '/settings', [ 'fade_ms' => 5000 ] );
 		$this->upload( 'short.mp3', 'x.mp3' );
 		$this->assertSame( 'Goal', MatchMusic\get_track( $id )['name'] );
+		$this->assertTrue( MatchMusic\get_track( $id )['quick_play'] );
 		$this->assertCount( 1, MatchMusic\list_tracks() );
 		$this->assertSame( 2000, get_fade_ms() );
 	}
@@ -122,7 +124,7 @@ class RestTest extends WP_UnitTestCase {
 		$r = $this->upload( 'short.mp3', 'Goal Song.mp3' );
 		$this->assertSame( 201, $r->get_status() );
 		$this->assertSame( 'Goal Song', $r->get_data()['name'] );
-		$this->assertSame( [ 'id', 'name', 'start_ms', 'order', 'size', 'version' ], array_keys( $r->get_data() ) );
+		$this->assertSame( [ 'id', 'name', 'start_ms', 'quick_play', 'order', 'size', 'version' ], array_keys( $r->get_data() ) );
 
 		$this->assertSame( 201, $this->upload( 'short-noid3.mp3', 'raw.mp3' )->get_status() );
 		$this->assertSame( 415, $this->upload( 'fake.mp3', 'fake.mp3' )->get_status() );
@@ -171,6 +173,16 @@ class RestTest extends WP_UnitTestCase {
 		$this->assertFileDoesNotExist( $file );
 		$this->assertSame( 404, $this->dispatch( 'DELETE', "/tracks/$id" )->get_status() );
 		$this->assertSame( 'mm_not_found', $this->dispatch( 'DELETE', "/tracks/$id" )->get_data()['code'] );
+	}
+
+	public function test_quick_play_over_rest() {
+		$id = $this->track();
+		$this->assertTrue( $this->dispatch( 'GET', '/tracks' )->get_data()[0]['quick_play'] );
+		$this->assertFalse( $this->dispatch( 'PATCH', "/tracks/$id", [ 'quick_play' => false ] )->get_data()['quick_play'] );
+		$this->assertFalse( $this->dispatch( 'GET', '/tracks' )->get_data()[0]['quick_play'] );
+		$bad = $this->dispatch( 'PATCH', "/tracks/$id", [ 'quick_play' => 'false' ] );
+		$this->assertSame( 400, $bad->get_status() );
+		$this->assertSame( 'mm_invalid_quick_play', $bad->get_data()['code'] );
 	}
 
 	public function test_order() {

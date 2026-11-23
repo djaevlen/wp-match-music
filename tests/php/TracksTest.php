@@ -53,6 +53,28 @@ class TracksTest extends WP_UnitTestCase {
 		$this->assertSame( 42300, get_track( $id )['start_ms'] );
 	}
 
+	public function test_quick_play_defaults_on_and_round_trips() {
+		$id = create_track( 'Goal', $this->tmp_copy(), 'goal.mp3' );
+		$this->assertSame( '', get_post_meta( $id, '_mm_quick_play', true ) ); // nothing stored yet
+		$this->assertTrue( get_track( $id )['quick_play'] );
+		$this->assertFalse( update_track( $id, [ 'quick_play' => false ] )['quick_play'] );
+		$this->assertSame( '0', get_post_meta( $id, '_mm_quick_play', true ) );
+		$this->assertFalse( get_track( $id )['quick_play'] );
+		$this->assertTrue( update_track( $id, [ 'quick_play' => true ] )['quick_play'] );
+		$this->assertSame( '1', get_post_meta( $id, '_mm_quick_play', true ) );
+	}
+
+	public function test_quick_play_must_be_a_boolean() {
+		$id = create_track( 'Goal', $this->tmp_copy(), 'goal.mp3' );
+		foreach ( [ 'false', 'true', 0, 1, null, '', [] ] as $bad ) {
+			$this->assertSame( 'mm_invalid_quick_play', update_track( $id, [ 'quick_play' => $bad ] )->get_error_code() );
+		}
+		// An invalid field stops the whole update: the name is not written either.
+		update_track( $id, [ 'name' => 'Changed', 'quick_play' => 'no' ] );
+		$this->assertSame( 'Goal', get_track( $id )['name'] );
+		$this->assertTrue( get_track( $id )['quick_play'] );
+	}
+
 	public function test_set_order() {
 		$id     = create_track( 'A', $this->tmp_copy(), 'a.mp3' );
 		$second = create_track( 'B', $this->tmp_copy(), 'b.mp3' );

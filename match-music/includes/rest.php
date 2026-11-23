@@ -8,12 +8,13 @@ const REST_NAMESPACE = 'match-music/v1';
 /** HTTP status for each error code the data layer can return. */
 function rest_error_statuses(): array {
 	return [
-		'mm_invalid_name'  => 400,
-		'mm_invalid_start' => 400,
-		'mm_invalid_order' => 400,
-		'mm_not_found'     => 404,
-		'mm_file_missing'  => 404,
-		'mm_store_failed'  => 500,
+		'mm_invalid_name'       => 400,
+		'mm_invalid_start'      => 400,
+		'mm_invalid_quick_play' => 400,
+		'mm_invalid_order'      => 400,
+		'mm_not_found'          => 404,
+		'mm_file_missing'       => 404,
+		'mm_store_failed'       => 500,
 	];
 }
 
@@ -171,7 +172,7 @@ function rest_upload_track( \WP_REST_Request $request ) {
 
 function rest_update_track( \WP_REST_Request $request ) {
 	$body   = rest_body( $request );
-	$fields = array_intersect_key( $body, [ 'name' => true, 'start_ms' => true ] );
+	$fields = array_intersect_key( $body, [ 'name' => true, 'start_ms' => true, 'quick_play' => true ] );
 	$track  = update_track( (int) $request['id'], $fields );
 	if ( is_wp_error( $track ) ) {
 		return rest_error_from( $track );
