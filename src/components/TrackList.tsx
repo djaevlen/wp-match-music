@@ -127,7 +127,12 @@ export function TrackList({ rows, store, canEdit }: TrackListProps) {
   const [editing, setEditing] = useState<number | null>(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    // Enter only: the space bar is the board's quick-play key (useQuickPlayKey) and never reaches
+    // the handle, so it is not offered here and the spoken instructions do not mention it.
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+      keyboardCodes: { start: ['Enter'], cancel: ['Escape'], end: ['Enter'] },
+    }),
   );
 
   if (rows.length === 0) {
@@ -171,7 +176,12 @@ export function TrackList({ rows, store, canEdit }: TrackListProps) {
   const editRow = rows.find((r) => r.track.id === editing);
   return (
     <>
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={onDragEnd}
+        accessibility={{ screenReaderInstructions: { draggable: strings.editor.reorderHelp } }}
+      >
         <SortableContext items={ids} strategy={rectSortingStrategy}>
           {grid}
         </SortableContext>

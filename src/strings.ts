@@ -30,6 +30,9 @@ export const strings = {
     dropHere: 'Drop mp3 files to add them',
     notMp3: (name: string) => `${name} is not an mp3 file.`,
     reorder: (name: string) => `Reorder ${name}`,
+    // Read to screen-reader users on the drag handle. Enter, not Space: Space is quick play.
+    reorderHelp:
+      'To pick up a track, press Enter. While dragging, use the arrow keys to move it. Press Enter again to drop it in its new place, or press Escape to cancel.',
     fadeLabel: 'Fade duration',
     edit: 'Edit',
     editTrack: (name: string) => `Edit ${name}`,

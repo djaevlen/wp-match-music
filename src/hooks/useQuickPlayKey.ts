@@ -7,6 +7,10 @@ import { strings } from '@/strings';
 // confirmation, a row menu, the fade popover (Radix renders these only while they are open).
 const OVERLAY = '[role="dialog"], [role="alertdialog"], [role="menu"]';
 // jsdom has no isContentEditable, so the attribute is tested instead.
+// A worn key can "bounce": one press arrives as two key downs a few tens of milliseconds apart,
+// neither marked as a repeat. A second press this soon after one that counted is ignored; a
+// deliberate double press is slower than this.
+const BOUNCE_MS = 100;
 const TYPING = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
 
 function isQuickPlayPress(e: KeyboardEvent): boolean {
@@ -19,11 +23,12 @@ function isQuickPlayPress(e: KeyboardEvent): boolean {
  * The space bar is the board's quick-play key: it starts a random track, or stops the one
  * playing (see BoardStore.quickPlay). The press is taken in the capture phase and consumed on
  * key down and key up, so it neither scrolls the page nor presses whichever button was clicked
- * last; a button that has focus is still pressed with Enter. A held key counts once.
+ * last; a button that has focus is still pressed with Enter. A held or bouncing key counts once.
  */
 export function useQuickPlayKey(store: Pick<BoardStore, 'quickPlay'>): void {
   useEffect(() => {
     let consumed = false; // the Space now held down was taken by quick play
+    let countedAt = -Infinity; // when a press last reached the store
     const consume = (e: KeyboardEvent) => {
       e.preventDefault();
       e.stopPropagation();
@@ -34,6 +39,9 @@ export function useQuickPlayKey(store: Pick<BoardStore, 'quickPlay'>): void {
       if (!consumed) return;
       consume(e);
       if (e.repeat) return;
+      const now = Date.now();
+      if (now - countedAt < BOUNCE_MS) return;
+      countedAt = now;
       if (store.quickPlay() === 'empty') toast(strings.board.quickPlayEmpty, { id: 'quick-play-empty' });
     };
     const onKeyUp = (e: KeyboardEvent) => {

@@ -49,6 +49,12 @@ const playing = (page: Page) => page.locator('[data-status="playing"]');
 const sounding = (page: Page) => page.locator('[data-status="playing"], [data-status="fading"]');
 const marker = (page: Page, id: number) => row(page, id).getByTestId('row-no-quick-play');
 
+/** A deliberate press: the board ignores a second press within 100 ms of the last (key bounce). */
+async function space(page: Page): Promise<void> {
+  await page.waitForTimeout(150);
+  await page.keyboard.press('Space');
+}
+
 /** The id of the one row that is playing. */
 async function playingId(page: Page): Promise<number> {
   await expect(playing(page)).toHaveCount(1);
@@ -63,12 +69,35 @@ test('Space after a mouse click on Play fades that track instead of pressing its
     .click();
   await expect(row(page, a)).toHaveAttribute('data-status', 'playing');
 
-  await page.keyboard.press('Space');
+  await space(page);
   await expect(row(page, a)).toHaveAttribute('data-status', 'ready', { timeout: FADE_MS + 2_000 });
 
   // It played once, faded and stopped: Space did not press the focused Play button again.
   expect((await statusesOf(page, a)).map((s) => s.status)).toEqual(['playing', 'fading', 'ready']);
   for (const id of [b, c, goal]) expect(await statusesOf(page, id)).toEqual([]);
+});
+
+test('Space after a mouse click on Stop starts the next track', async ({ page }) => {
+  await openBoard(page);
+  const wide = row(page, a).getByTestId('row-wide-controls');
+  await wide.getByRole('button', { name: strings.row.play, exact: true }).click();
+  await expect(row(page, a)).toHaveAttribute('data-status', 'playing');
+  // The Stop button is disabled once the fade ends, while it may still hold the focus.
+  await wide.getByRole('button', { name: strings.row.stop, exact: true }).click();
+  await expect(row(page, a)).toHaveAttribute('data-status', 'ready', { timeout: FADE_MS + 2_000 });
+
+  await space(page);
+  expect(await playingId(page)).not.toBe(a); // A was just played by hand
+});
+
+test('a bouncing key counts as one press', async ({ page }) => {
+  await openBoard(page);
+  await space(page);
+  await page.keyboard.press('Space'); // down, up, down within a few milliseconds
+  const id = await playingId(page);
+  await page.waitForTimeout(FADE_MS);
+  await expect(row(page, id)).toHaveAttribute('data-status', 'playing');
+  expect((await statusesOf(page, id)).map((s) => s.status)).toEqual(['playing']);
 });
 
 test('Space starts a pool track, never the switched-off one, and does not repeat within a round', async ({
@@ -81,9 +110,9 @@ test('Space starts a pool track, never the switched-off one, and does not repeat
 
   const started: number[] = [];
   for (let i = 0; i < 6; i++) {
-    await page.keyboard.press('Space');
+    await space(page);
     started.push(await playingId(page));
-    await page.keyboard.press('Space');
+    await space(page);
     await expect(sounding(page)).toHaveCount(0);
   }
   expect([...started.slice(0, 3)].sort()).toEqual([a, b, c].sort());
@@ -95,12 +124,12 @@ test('Space starts a pool track, never the switched-off one, and does not repeat
 test('Space during a fade starts another track', async ({ page }) => {
   setFadeMs(5000);
   await openBoard(page);
-  await page.keyboard.press('Space');
+  await space(page);
   const first = await playingId(page);
-  await page.keyboard.press('Space');
+  await space(page);
   await expect(row(page, first)).toHaveAttribute('data-status', 'fading');
 
-  await page.keyboard.press('Space');
+  await space(page);
   const second = await playingId(page);
   expect(second).not.toBe(first);
   await expect(row(page, first)).toHaveAttribute('data-status', 'ready');
@@ -130,14 +159,14 @@ test('Space types in the name field and starts nothing', async ({ page }) => {
   await expect(name).toHaveValue('Track A X Y');
   // Space on a button inside the dialog belongs to the dialog too.
   await dialog.getByRole('button', { name: strings.editor.cancel }).focus();
-  await page.keyboard.press('Space');
+  await space(page);
   await expect(dialog).toBeHidden();
   expect(await sounding(page).count()).toBe(0);
   for (const id of [a, b, c, goal]) expect(await statusesOf(page, id)).toEqual([]);
   await expect(row(page, a)).toContainText('Track A');
 
   // Back on the board the key is quick play again.
-  await page.keyboard.press('Space');
+  await space(page);
   await playingId(page);
 });
 

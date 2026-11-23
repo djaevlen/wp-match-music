@@ -92,3 +92,40 @@ test('unmount removes the listeners', () => {
   expect(fireEvent.keyUp(document.body, space)).toBe(true);
   expect(store.quickPlay).not.toHaveBeenCalled();
 });
+
+// A worn space bar "bounces": one press arrives as down, up, down within a few tens of
+// milliseconds, none of them marked as a repeat.
+describe('key bounce', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  test('a second press within a tenth of a second is consumed but does nothing', () => {
+    fireEvent.keyDown(document.body, space);
+    fireEvent.keyUp(document.body, space);
+    vi.advanceTimersByTime(30);
+    expect(fireEvent.keyDown(document.body, space)).toBe(false);
+    expect(fireEvent.keyUp(document.body, space)).toBe(false);
+    expect(store.quickPlay).toHaveBeenCalledTimes(1);
+  });
+
+  test('a deliberate second press a moment later counts', () => {
+    fireEvent.keyDown(document.body, space);
+    fireEvent.keyUp(document.body, space);
+    vi.advanceTimersByTime(150);
+    fireEvent.keyDown(document.body, space);
+    expect(store.quickPlay).toHaveBeenCalledTimes(2);
+  });
+
+  test('a bounce does not hold off the press after it', () => {
+    fireEvent.keyDown(document.body, space);
+    vi.advanceTimersByTime(60);
+    fireEvent.keyDown(document.body, space); // bounce, ignored
+    vi.advanceTimersByTime(60); // 120 ms after the press that counted
+    fireEvent.keyDown(document.body, space);
+    expect(store.quickPlay).toHaveBeenCalledTimes(2);
+  });
+});

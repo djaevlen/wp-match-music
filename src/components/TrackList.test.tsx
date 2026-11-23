@@ -49,6 +49,14 @@ test('editors get a named drag handle on every row', () => {
   expect(screen.getByRole('button', { name: 'Reorder Track 3' })).toBeInTheDocument();
 });
 
+test('the drag handle tells screen-reader users to use Enter, since Space is quick play', () => {
+  render(<TrackList rows={rows} store={store()} canEdit />);
+  const handle = screen.getByRole('button', { name: 'Reorder Track 3' });
+  expect(handle).toHaveAccessibleDescription(
+    'To pick up a track, press Enter. While dragging, use the arrow keys to move it. Press Enter again to drop it in its new place, or press Escape to cancel.',
+  );
+});
+
 test('viewers get no drag handles', () => {
   render(<TrackList rows={rows} store={store()} canEdit={false} />);
   expect(screen.queryByRole('button', { name: /^Reorder / })).toBeNull();
