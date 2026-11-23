@@ -12,7 +12,7 @@ const boot: Boot = {
   fadeMs: 1500,
 };
 
-const track = { id: 1, name: 'Goal', start_ms: 0, order: 0, size: 10, version: 'a' };
+const track = { id: 1, name: 'Goal', start_ms: 0, quick_play: true, order: 0, size: 10, version: 'a' };
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

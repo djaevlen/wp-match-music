@@ -98,8 +98,8 @@ test('header shows the fade and loading progress', () => {
     loaded: () => 1,
     total: () => 2,
     rows: () => [
-      { track: { id: 1, name: 'A', start_ms: 0, order: 1, size: 1, version: 'a' }, status: 'ready' },
-      { track: { id: 2, name: 'B', start_ms: 0, order: 2, size: 1, version: 'a' }, status: 'loading' },
+      { track: { id: 1, name: 'A', start_ms: 0, quick_play: true, order: 1, size: 1, version: 'a' }, status: 'ready' },
+      { track: { id: 2, name: 'B', start_ms: 0, quick_play: true, order: 2, size: 1, version: 'a' }, status: 'loading' },
     ],
   });
   render(<Board />);

@@ -8,7 +8,7 @@ import { EditTrackDialog, type EditTrackStore } from './EditTrackDialog';
 vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
 vi.mock('@/audio/peaks', () => ({ decodePeaks: vi.fn() }));
 
-const track: Track = { id: 7, name: 'Goal', start_ms: 42300, order: 1, size: 1000, version: 'a' };
+const track: Track = { id: 7, name: 'Goal', start_ms: 42300, quick_play: true, order: 1, size: 1000, version: 'a' };
 
 beforeAll(() => {
   globalThis.ResizeObserver ??= class {

@@ -18,7 +18,7 @@ class FakeAudioContext extends EventTarget {
   }
 }
 
-const track: Track = { id: 1, name: 'Goal', start_ms: 0, order: 1, size: 1, version: 'a' };
+const track: Track = { id: 1, name: 'Goal', start_ms: 0, quick_play: true, order: 1, size: 1, version: 'a' };
 
 function setup() {
   const api = {

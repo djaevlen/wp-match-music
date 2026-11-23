@@ -7,7 +7,7 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
 vi.mock('@/audio/peaks', () => ({ decodePeaks: vi.fn(async () => ({ peaks: new Float32Array(10), durationSec: 30 })) }));
 
 const rows: BoardRow[] = [1, 2, 3, 4, 5].map((id) => ({
-  track: { id, name: `Track ${id}`, start_ms: 0, order: id, size: 1, version: 'a' },
+  track: { id, name: `Track ${id}`, start_ms: 0, quick_play: true, order: id, size: 1, version: 'a' },
   status: 'ready',
 }));
 beforeAll(() => {

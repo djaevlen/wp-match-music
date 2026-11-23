@@ -1,8 +1,12 @@
-import { SessionExpiredError, type Api, type Track } from './api';
+import { SessionExpiredError, type Api, type Track, type TrackPatch } from './api';
 import type { Engine, TrackState } from './audio/engine';
 import type { Voice } from './audio/voice';
+import { inQuickPlay, pickNext } from './lib/quick-pick';
 
 export type RowStatus = 'loading' | 'error' | TrackState;
+
+/** What a quick-play press did: started a track, stopped the playing one, or found none to start. */
+export type QuickPlayResult = 'started' | 'stopped' | 'empty';
 
 export interface BoardRow {
   track: Track;
@@ -23,6 +27,8 @@ export interface BoardDeps {
   makeVoice(blob: Blob): Promise<Voice>;
   loadBlob(t: Track): Promise<Blob>;
   prune(keep: Track[]): Promise<void>;
+  /** A number in [0, 1) for the quick-play draw; Math.random unless a test says otherwise. */
+  random?: () => number;
 }
 
 const PARALLEL_DOWNLOADS = 3;
@@ -70,6 +76,8 @@ export class BoardStore {
   private voiceQueue: Promise<void> = Promise.resolve(); // voices are built one at a time
   private playedFromMs = new Map<number, number>();
   private pendingPress: { id: number; fromMs?: number; at: number } | null = null; // Play waiting for the output
+  private roundPlayed = new Set<number>(); // tracks started in the current quick-play round
+  private lastStarted: number | null = null; // the track started most recently
 
   private refreshing: Promise<void> | null = null;
   private mutations = 0; // bumped by local writes, so an older list does not undo them
@@ -184,6 +192,30 @@ export class BoardStore {
     this.deps.engine.stop(id);
   }
 
+  /**
+   * The space bar. A track playing at full volume is stopped, as its Stop button would. Otherwise
+   * (silence, or a track fading out) the next quick-play track starts: a random one among those
+   * switched on and loaded, with no repeat until each has had a turn. A fading track is cut by
+   * that start, as by any Play on another track.
+   */
+  quickPlay(): QuickPlayResult {
+    const { engine } = this.deps;
+    const active = engine.activeId();
+    if (active !== null && engine.state(active) === 'playing') {
+      this.stop(active);
+      return 'stopped';
+    }
+    const pool = this.order.filter((id) => {
+      const e = this.entries.get(id);
+      return e !== undefined && !e.gone && inQuickPlay(e.track) && engine.has(id);
+    });
+    const pick = pickNext(pool, this.roundPlayed, this.lastStarted, this.deps.random ?? Math.random);
+    if (!pick) return 'empty';
+    if (pick.newRound) this.roundPlayed.clear();
+    this.play(pick.id);
+    return 'started';
+  }
+
   /** Silences whatever is sounding at once, with no fade, and drops a waiting Play. */
   cutActive(): void {
     this.pendingPress = null;
@@ -213,6 +245,10 @@ export class BoardStore {
     const e = this.entries.get(id);
     if (!e || !this.deps.engine.has(id)) return;
     this.playedFromMs.set(id, fromMs ?? e.track.start_ms);
+    // Every start counts in the quick-play round (a click as much as the space bar), and only
+    // a start: a press that never reached the engine does not use the track up.
+    this.roundPlayed.add(id);
+    this.lastStarted = id;
     this.deps.engine.play(id, fromMs);
   }
 
@@ -297,7 +333,7 @@ export class BoardStore {
     return results;
   }
 
-  async update(id: number, patch: { name?: string; start_ms?: number }): Promise<void> {
+  async update(id: number, patch: TrackPatch): Promise<void> {
     const t = await this.call(() => this.deps.api.updateTrack(id, patch));
     this.mutations++;
     this.applyTrack(t, true);

@@ -1,6 +1,6 @@
 import { ApiError, SessionExpiredError, type Api, type Track } from './api';
 import { Engine } from './audio/engine';
-import { BoardStore } from './board-store';
+import { BoardStore, PENDING_PRESS_MS } from './board-store';
 import { FakeVoice } from './test/fake-voice';
 
 interface Deferred<T> {
@@ -27,6 +27,7 @@ const track = (id: number, extra: Partial<Track> = {}): Track => ({
   id,
   name: `Track ${id}`,
   start_ms: 0,
+  quick_play: true,
   order: id,
   size: 1000,
   version: 'a',
@@ -37,7 +38,7 @@ const track = (id: number, extra: Partial<Track> = {}): Track => ({
  * A store over a fake api, the real Engine and FakeVoices. Each loadBlob call waits on a
  * deferred the test settles; `autoLoad` settles them at once.
  */
-function setup(initial: Track[], { autoLoad = false } = {}) {
+function setup(initial: Track[], { autoLoad = false, random }: { autoLoad?: boolean; random?: () => number } = {}) {
   let server = initial.map((t) => ({ ...t }));
   const api = {
     listTracks: vi.fn(async () => server.map((t) => ({ ...t }))),
@@ -84,7 +85,7 @@ function setup(initial: Track[], { autoLoad = false } = {}) {
     unlock: vi.fn(async () => {}),
   };
 
-  const store = new BoardStore({ api: api as unknown as Api, engine, output, loadBlob, makeVoice, prune }, 2000);
+  const store = new BoardStore({ api: api as unknown as Api, engine, output, loadBlob, makeVoice, prune, random }, 2000);
 
   const resolveLoad = async (id: number, version = 'a') => {
     const l = loads.find((x) => x.track.id === id && x.track.version === version)!;
@@ -769,4 +770,136 @@ test('an audio load (maybe from the cache) does not clear the session-expired fl
   await s.resolveLoad(1);
   expect(s.statuses()[0]).toBe('ready');
   expect(s.store.sessionExpired()).toBe(true);
+});
+
+// Quick play (the space bar)
+
+/** A board whose tracks are all loaded and ready. */
+async function ready(tracks: Track[], opts: { random?: () => number } = {}) {
+  const s = setup(tracks, { autoLoad: true, ...opts });
+  await s.store.refresh();
+  await flush();
+  return s;
+}
+const seq = (...values: number[]) => () => values.shift() ?? 0;
+
+test('quickPlay on a silent board starts a pool track from its start point', async () => {
+  const s = await ready([track(1, { start_ms: 5000 })]);
+  expect(s.store.quickPlay()).toBe('started');
+  expect(s.engine.state(1)).toBe('playing');
+  expect(s.voiceOf(1).last()).toEqual(['start', 5]);
+});
+
+test('quickPlay on a playing track stops it like Stop, however it was started', async () => {
+  const s = await ready([track(1), track(2)]);
+  s.store.play(2);
+  expect(s.store.quickPlay()).toBe('stopped');
+  expect(s.engine.state(2)).toBe('fading');
+  expect(s.voiceOf(2).last()).toEqual(['fadeOut', 2]);
+});
+
+test('quickPlay during a fade starts the next track and cuts the fading one', async () => {
+  const s = await ready([track(1), track(2)], { random: () => 0 });
+  s.store.quickPlay(); // starts 1
+  s.store.quickPlay(); // fades 1
+  expect(s.store.quickPlay()).toBe('started');
+  expect(s.engine.state(1)).toBe('ready');
+  expect(s.engine.state(2)).toBe('playing');
+});
+
+test('no track repeats within a round, and a new round never opens with the last track', async () => {
+  // Fourth draw: without the rule, 0.99 over [1, 2, 3] would repeat track 3.
+  const s = await ready([track(1), track(2), track(3)], { random: seq(0, 0, 0, 0.99) });
+  const started: number[] = [];
+  for (let i = 0; i < 4; i++) {
+    s.store.quickPlay();
+    started.push(s.engine.activeId()!);
+    s.store.cutActive();
+  }
+  expect(started).toEqual([1, 2, 3, 2]);
+});
+
+test('a track started by hand counts as played in the round', async () => {
+  const s = await ready([track(1), track(2)], { random: () => 0 });
+  s.store.play(1);
+  s.store.cutActive();
+  s.store.quickPlay();
+  expect(s.engine.activeId()).toBe(2);
+});
+
+test('switched-off and still-loading tracks are never picked', async () => {
+  const s = setup([track(1, { quick_play: false }), track(2), track(3)], { random: () => 0 });
+  await s.store.refresh();
+  await s.resolveLoad(1);
+  await s.resolveLoad(3); // track 2 is still loading
+  for (let i = 0; i < 4; i++) {
+    expect(s.store.quickPlay()).toBe('started');
+    expect(s.engine.activeId()).toBe(3);
+    s.store.cutActive();
+  }
+});
+
+test('with nothing in the pool quickPlay reports empty and plays nothing', async () => {
+  const s = await ready([track(1, { quick_play: false })]);
+  expect(s.store.quickPlay()).toBe('empty');
+  expect(s.engine.activeId()).toBeNull();
+});
+
+test('a pool of one starts every time, and Space during its fade restarts it', async () => {
+  const s = await ready([track(1)]);
+  s.store.quickPlay();
+  s.store.cutActive();
+  expect(s.store.quickPlay()).toBe('started');
+  s.store.quickPlay(); // fades it
+  expect(s.store.quickPlay()).toBe('started');
+  expect(s.engine.state(1)).toBe('playing');
+  expect(s.voiceOf(1).names().slice(-2)).toEqual(['cancelFade', 'start']);
+});
+
+test('a track without the field is in the pool', async () => {
+  const legacy = track(1);
+  delete (legacy as Partial<Track>).quick_play;
+  const s = await ready([legacy]);
+  expect(s.store.quickPlay()).toBe('started');
+});
+
+test('with the output not running quickPlay waits like Play, and counts the track only once it starts', async () => {
+  const s = await ready([track(1), track(2)], { random: () => 0 });
+  s.output.state = 'suspended';
+  expect(s.store.quickPlay()).toBe('started');
+  expect(s.output.unlock).toHaveBeenCalledTimes(1);
+  expect(s.engine.activeId()).toBeNull();
+  vi.advanceTimersByTime(PENDING_PRESS_MS + 1); // the press is dropped; nothing ever started
+  s.output.state = 'running';
+  s.store.outputChanged();
+  expect(s.engine.activeId()).toBeNull();
+  s.store.quickPlay();
+  expect(s.engine.activeId()).toBe(1); // track 1 was not used up by the lost press
+});
+
+test('a track switched off or deleted elsewhere mid-round is not picked', async () => {
+  const s = await ready([track(1), track(2), track(3)], { random: () => 0 });
+  s.store.quickPlay(); // 1
+  s.store.cutActive();
+  s.setServer([track(1), track(2, { quick_play: false })]); // 2 off, 3 deleted
+  await s.store.refresh();
+  await flush();
+  expect(s.store.quickPlay()).toBe('started');
+  expect(s.engine.activeId()).toBe(1); // the only one left: a new round
+});
+
+test('switching off the playing track does not interrupt it, and it is not picked again', async () => {
+  const s = await ready([track(1), track(2)], { random: () => 0 });
+  s.store.quickPlay(); // 1
+  s.api.updateTrack.mockResolvedValueOnce(track(1, { quick_play: false }));
+  await s.store.update(1, { quick_play: false });
+  expect(s.api.updateTrack).toHaveBeenCalledWith(1, { quick_play: false });
+  expect(s.engine.state(1)).toBe('playing');
+  expect(s.voiceOf(1).names()).not.toContain('halt');
+  s.store.cutActive();
+  for (let i = 0; i < 3; i++) {
+    s.store.quickPlay();
+    expect(s.engine.activeId()).toBe(2);
+    s.store.cutActive();
+  }
 });

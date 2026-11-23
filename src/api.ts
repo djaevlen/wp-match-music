@@ -6,10 +6,15 @@ export interface Track {
   id: number;
   name: string;
   start_ms: number;
+  /** Whether Space may pick the track at random; read it through inQuickPlay(). */
+  quick_play: boolean;
   order: number;
   size: number;
   version: string;
 }
+
+/** The track fields an editor can change. */
+export type TrackPatch = { name?: string; start_ms?: number; quick_play?: boolean };
 
 export interface Settings {
   fade_ms: number;
@@ -37,7 +42,7 @@ export class SessionExpiredError extends Error {
 export interface Api {
   listTracks(): Promise<Track[]>;
   uploadTrack(file: File, onProgress: (fraction: number) => void): Promise<Track>;
-  updateTrack(id: number, patch: { name?: string; start_ms?: number }): Promise<Track>;
+  updateTrack(id: number, patch: TrackPatch): Promise<Track>;
   deleteTrack(id: number): Promise<void>;
   saveOrder(ids: number[]): Promise<Track[]>;
   fetchAudio(id: number): Promise<Response>;

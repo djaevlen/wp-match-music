@@ -3,7 +3,7 @@ import type { Track } from '@/api';
 import type { RowStatus } from '@/board-store';
 import { TrackRow } from './TrackRow';
 
-const track: Track = { id: 7, name: 'Goal', start_ms: 42300, order: 1, size: 1000, version: 'a' };
+const track: Track = { id: 7, name: 'Goal', start_ms: 42300, quick_play: true, order: 1, size: 1000, version: 'a' };
 
 function renderRow(status: RowStatus, { canEdit = false, editorSlot = undefined as React.ReactNode } = {}) {
   const store = {
