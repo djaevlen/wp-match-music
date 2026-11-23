@@ -1,8 +1,10 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Play, Square } from 'lucide-react';
 import { toast } from 'sonner';
+import type { TrackPatch } from '@/api';
 import { decodePeaks } from '@/audio/peaks';
 import type { BoardRow, BoardStore } from '@/board-store';
+import { inQuickPlay } from '@/lib/quick-pick';
 import { formatMs, snapMs } from '@/lib/time';
 import { strings } from '@/strings';
 import {
@@ -19,6 +21,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { Waveform } from './Waveform';
 
 export type EditTrackStore = Pick<
@@ -84,9 +87,16 @@ function EditTrackForm({
 }) {
   const id = row.track.id;
   const nameId = useId();
-  const [saved] = useState(() => ({ name: row.track.name, startMs: row.track.start_ms }));
+  const quickId = useId();
+  const quickHelpId = useId();
+  const [saved] = useState(() => ({
+    name: row.track.name,
+    startMs: row.track.start_ms,
+    quickPlay: inQuickPlay(row.track),
+  }));
   const [name, setName] = useState(saved.name);
   const [startMs, setStartMs] = useState(saved.startMs);
+  const [quickPlay, setQuickPlay] = useState(saved.quickPlay);
   const [wave, setWave] = useState<Wave>({ state: 'decoding' });
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -147,10 +157,11 @@ function EditTrackForm({
   const nudge = (deltaMs: number) => setStart(startMs + deltaMs);
 
   const save = async () => {
-    const patch: { name?: string; start_ms?: number } = {};
+    const patch: TrackPatch = {};
     if (name !== saved.name) patch.name = name;
     if (startMs !== saved.startMs) patch.start_ms = startMs;
-    if (patch.name === undefined && patch.start_ms === undefined) return close();
+    if (quickPlay !== saved.quickPlay) patch.quick_play = quickPlay;
+    if (Object.keys(patch).length === 0) return close();
     setBusy(true);
     try {
       await store.update(id, patch);
@@ -186,6 +197,16 @@ function EditTrackForm({
       <div className="grid gap-1.5">
         <Label htmlFor={nameId}>{strings.editor.name}</Label>
         <Input id={nameId} value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" />
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <div className="grid gap-0.5">
+          <Label htmlFor={quickId}>{strings.editor.quickPlay}</Label>
+          <p id={quickHelpId} className="text-xs text-muted-foreground">
+            {strings.editor.quickPlayHelp}
+          </p>
+        </div>
+        <Switch id={quickId} aria-describedby={quickHelpId} checked={quickPlay} onCheckedChange={setQuickPlay} />
       </div>
 
       <div className="grid gap-1.5">

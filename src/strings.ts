@@ -21,6 +21,7 @@ export const strings = {
     fading: 'fading',
     loading: 'Loading…',
     loadFailed: 'Could not load',
+    notInQuickPlay: 'Not in quick play',
   },
   editor: {
     fadeNotSaved: 'The fade could not be saved.',
@@ -35,6 +36,8 @@ export const strings = {
     moreFor: (name: string) => `More for ${name}`,
     title: 'Edit track',
     name: 'Name',
+    quickPlay: 'Quick play',
+    quickPlayHelp: 'Included when Space picks a random track',
     startPointHelp: 'Start point: drag the red line, or click anywhere in the waveform',
     startPoint: 'Start point',
     back1: '− 1 s',

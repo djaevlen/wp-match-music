@@ -5,14 +5,17 @@ import { TrackRow } from './TrackRow';
 
 const track: Track = { id: 7, name: 'Goal', start_ms: 42300, quick_play: true, order: 1, size: 1000, version: 'a' };
 
-function renderRow(status: RowStatus, { canEdit = false, editorSlot = undefined as React.ReactNode } = {}) {
+function renderRow(
+  status: RowStatus,
+  { canEdit = false, editorSlot = undefined as React.ReactNode, track: t = track } = {},
+) {
   const store = {
     play: vi.fn(),
     stop: vi.fn(),
     retry: vi.fn(),
     elapsedSec: vi.fn(() => 7.4),
   };
-  const view = render(<TrackRow row={{ track, status }} store={store} canEdit={canEdit} editorSlot={editorSlot} />);
+  const view = render(<TrackRow row={{ track: t, status }} store={store} canEdit={canEdit} editorSlot={editorSlot} />);
   const root = view.container.querySelector('[data-track-id]') as HTMLElement;
   const wide = (name: 'Play' | 'Stop') => within(screen.getByTestId('row-wide-controls')).getByRole('button', { name });
   return { store, root, wide, toggle: () => screen.getByTestId('row-toggle'), unmount: view.unmount };
@@ -93,4 +96,26 @@ test('viewer sees no editor controls', () => {
   viewer.unmount();
   renderRow('ready', { canEdit: true, editorSlot: slot });
   expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+});
+
+test('a row out of quick play shows the marker', () => {
+  renderRow('ready', { track: { ...track, quick_play: false } });
+  expect(screen.getByTestId('row-no-quick-play')).toHaveAccessibleName('Not in quick play');
+});
+
+test('a row in quick play shows no marker', () => {
+  renderRow('ready');
+  expect(screen.queryByTestId('row-no-quick-play')).toBeNull();
+});
+
+test('a row whose track came without the field shows no marker', () => {
+  const legacy: Partial<Track> = { ...track };
+  delete legacy.quick_play;
+  renderRow('ready', { track: legacy as Track });
+  expect(screen.queryByTestId('row-no-quick-play')).toBeNull();
+});
+
+test('the marker stays while the row plays', () => {
+  renderRow('playing', { track: { ...track, quick_play: false } });
+  expect(screen.getByTestId('row-no-quick-play')).toBeInTheDocument();
 });

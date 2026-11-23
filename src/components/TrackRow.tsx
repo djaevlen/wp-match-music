@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Play, RotateCw, Square } from 'lucide-react';
+import { Ban, Play, RotateCw, Square } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { BoardRow, BoardStore, RowStatus } from '@/board-store';
+import { inQuickPlay } from '@/lib/quick-pick';
 import { formatElapsed, formatMs } from '@/lib/time';
 import { strings } from '@/strings';
 import { Button } from '@/components/ui/button';
@@ -80,6 +81,18 @@ export function TrackRow({ row, store, canEdit, editorSlot }: TrackRowProps) {
         >
           {statusText(status, track.start_ms, () => store.elapsedSec(id))}
         </span>
+        {/* Says what Space will never pick; smaller than the buttons, so the row keeps its height. */}
+        {!inQuickPlay(track) && (
+          <span
+            role="img"
+            aria-label={strings.row.notInQuickPlay}
+            title={strings.row.notInQuickPlay}
+            data-testid="row-no-quick-play"
+            className="shrink-0 text-muted-foreground"
+          >
+            <Ban className="size-4" />
+          </span>
+        )}
 
         {status === 'error' ? (
           <Button variant="outline" onClick={() => store.retry(id)}>

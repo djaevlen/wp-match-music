@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { toast } from 'sonner';
-import type { Track } from '@/api';
+import type { Track, TrackPatch } from '@/api';
 import { decodePeaks } from '@/audio/peaks';
 import type { BoardRow, RowStatus } from '@/board-store';
 import { EditTrackDialog, type EditTrackStore } from './EditTrackDialog';
@@ -37,7 +37,7 @@ function fakeStore(rows: BoardRow[]) {
     positionSec: vi.fn(() => 0),
     durationSec: vi.fn(() => 200),
     audioBlob: vi.fn(async () => new Blob(['mp3'])),
-    update: vi.fn(async (_id: number, _patch: { name?: string; start_ms?: number }) => {}),
+    update: vi.fn(async (_id: number, _patch: TrackPatch) => {}),
     remove: vi.fn(async (_id: number) => {}),
     rows: () => store.current,
     subscribe: (l: () => void) => {
@@ -349,4 +349,58 @@ test('clicking the waveform sets the start point, snapped', async () => {
   expect(readout()).toHaveTextContent('1:40.0');
   fireEvent.pointerDown(wave, { clientX: 999, pointerId: 2, button: 0 });
   expect(readout()).toHaveTextContent('3:19.9');
+});
+
+// The quick play switch
+
+const quickSwitch = () => screen.getByRole('switch', { name: 'Quick play' });
+
+test('the switch shows the saved setting, with its help line', async () => {
+  await open();
+  expect(quickSwitch()).toBeChecked();
+  expect(quickSwitch()).toHaveAccessibleDescription('Included when Space picks a random track');
+});
+
+test('a track switched off shows the switch off', async () => {
+  await open('ready', { ...track, quick_play: false });
+  expect(quickSwitch()).not.toBeChecked();
+});
+
+test('a track without the field shows the switch on', async () => {
+  const legacy: Partial<Track> = { ...track };
+  delete legacy.quick_play;
+  await open('ready', legacy as Track);
+  expect(quickSwitch()).toBeChecked();
+});
+
+test('turning the switch off is a draft until Save, then sends only quick_play', async () => {
+  const { store, button } = await open();
+  fireEvent.click(quickSwitch());
+  expect(quickSwitch()).not.toBeChecked();
+  expect(store.update).not.toHaveBeenCalled();
+  fireEvent.click(button('Save'));
+  await waitFor(() => expect(store.update).toHaveBeenCalledWith(7, { quick_play: false }));
+});
+
+test('turning the switch on sends quick_play true', async () => {
+  const { store, button } = await open('ready', { ...track, quick_play: false });
+  fireEvent.click(quickSwitch());
+  fireEvent.click(button('Save'));
+  await waitFor(() => expect(store.update).toHaveBeenCalledWith(7, { quick_play: true }));
+});
+
+test('a switch toggled and toggled back sends nothing', async () => {
+  const { store, button, onOpenChange } = await open();
+  fireEvent.click(quickSwitch());
+  fireEvent.click(quickSwitch());
+  fireEvent.click(button('Save'));
+  await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  expect(store.update).not.toHaveBeenCalled();
+});
+
+test('cancel after toggling sends nothing', async () => {
+  const { store, button } = await open();
+  fireEvent.click(quickSwitch());
+  fireEvent.click(button('Cancel'));
+  expect(store.update).not.toHaveBeenCalled();
 });
